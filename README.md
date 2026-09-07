@@ -12,6 +12,6 @@ Read [CHANGELOG.md](CHANGELOG.md) for the player-visible differences from vanill
 
 ## Installation
 
-The client archive targets SPT 4.1.3. With the game closed, extract it into the SPT installation root so that `GunsAreLoud.Client.dll` is under `BepInEx/plugins/GunsAreLoud`. Existing configuration files are preserved.
+The client archive targets SPT 4.1.5. With the game closed, extract it into the SPT installation root so that `GunsAreLoud.Client.dll` is under `BepInEx/plugins/GunsAreLoud`. Existing configuration files are preserved.
 
 **The client archive alone does not activate Realistic headset processing.** It requires the native GAL audio effect to be registered before Unity starts. Without that prerequisite, headset audio uses Vanilla fallback. The [native registration tooling](build/headphones/README.md) is locked to the development installation and is not a portable end-user installer. Gunshot and explosion hearing features do not require that native headset effect.
