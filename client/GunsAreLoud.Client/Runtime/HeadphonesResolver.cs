@@ -1,0 +1,54 @@
+using System;
+using EFT.InventoryLogic;
+
+namespace GunsAreLoud.Client.Runtime
+{
+    internal readonly struct EquippedHeadphonesState
+    {
+        internal readonly bool Active;
+        internal readonly string Name, MixerName, Source;
+        internal readonly float ThresholdDb;
+
+        internal EquippedHeadphonesState(bool active, string name, string mixerName, string source, float threshold)
+        {
+            Active = active; Name = name; MixerName = mixerName; Source = source; ThresholdDb = threshold;
+        }
+    }
+
+    internal static class HeadphonesResolver
+    {
+        internal static HeadphonesTemplate FindEquipped(InventoryEquipment equipment)
+            => FindEquippedItem(equipment)?.Template;
+
+        internal static Headphones FindEquippedItem(InventoryEquipment equipment)
+        {
+            if (equipment == null) return null;
+            if (equipment.GetSlot(EquipmentSlot.Earpiece)?.ContainedItem is Headphones earpiece)
+                return earpiece;
+            // Same slots and precedence as EFT.Player.UpdatePhonesReally. Never
+            // scan pockets/backpack and mistake carried headphones for worn ones.
+            if (equipment.GetSlot(EquipmentSlot.Headwear)?.ContainedItem is CompoundItem headwear)
+                foreach (Item item in headwear.GetAllItemsFromCollection())
+                    if (item is Headphones mounted) return mounted;
+            return null;
+        }
+
+        internal static EquippedHeadphonesState Resolve(
+            HeadphonesTemplate equipped, HeadphonesTemplate mixer, bool equipmentKnown)
+        {
+            string mixerName = Name(mixer);
+            HeadphonesTemplate selected = equipmentKnown ? equipped : IsActiveMixer(mixer) ? mixer : null;
+            return new EquippedHeadphonesState(selected != null, Name(selected), mixerName,
+                equipmentKnown ? "equipment" : "mixer-fallback", selected?.CompressorThreshold ?? 0f);
+        }
+
+        private static string Name(HeadphonesTemplate template) =>
+            template == null ? "None" : string.IsNullOrEmpty(template.ShortName) ? "Unknown" : template.ShortName;
+
+        private static bool IsActiveMixer(HeadphonesTemplate template) => template != null &&
+            !string.IsNullOrWhiteSpace(template.ShortName) &&
+            !string.Equals(template.ShortName, "Default", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(template.ShortName, "LowMute", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(template.ShortName, "StrongMute", StringComparison.OrdinalIgnoreCase);
+    }
+}

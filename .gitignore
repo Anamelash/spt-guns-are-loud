@@ -1,0 +1,17 @@
+# Build output
+bin/
+obj/
+dist/
+*.user
+
+# IDE and machine-local state
+.vs/
+.idea/
+.vscode/
+Directory.Build.props.user
+
+# Internal research notes are intentionally local-only
+docs/internal/
+
+# Local implementation blueprints
+blueprints/
