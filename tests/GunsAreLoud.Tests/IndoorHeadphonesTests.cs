@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using BepInEx.Configuration;
 using EFT.InventoryLogic;
@@ -87,7 +87,7 @@ namespace GunsAreLoud.Tests
         {
             object[] tags = _config.IndoorHeadphonesDampingPercent.Description.Tags;
             Assert.That(tags, Has.Some.Matches<object>(tag =>
-                tag.GetType().GetProperty("Browsable")?.GetValue(tag) is bool visible && !visible));
+                tag.GetType().GetField("Browsable")?.GetValue(tag) is bool visible && !visible));
         }
 
         [Test]

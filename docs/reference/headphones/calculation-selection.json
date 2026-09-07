@@ -1,0 +1,88 @@
+{
+  "version": "0.20.0",
+  "profiles": [
+    {
+      "replaces": "tactical-sport-proposed",
+      "profileId": "sporttac-family-reference",
+      "researchFile": "research-peltor.json",
+      "jsonPointer": "/variants/1/attenuation",
+      "source": "https://multimedia.3m.com/mws/media/940033O/fp3584-sporttac-pdf.pdf?fn=FP3584_SportTac.pdf",
+      "page": "1",
+      "standard": "EN 352",
+      "configuration": "MT16H210F headband",
+      "evidence": "FamilySurrogate",
+      "assumption": "SportTac family transfer; exact Tactical Sport SKU unverified"
+    },
+    {
+      "replaces": "comtac-iv-proposed",
+      "profileId": "comtac-iv-ultrafit-reference",
+      "researchFile": "research-peltor.json",
+      "jsonPointer": "/variants/2/attenuation_options/0",
+      "source": "https://multimedia.3m.com/mws/media/1142194O/3m-peltor-comtac-iv-headset-datasheet-pdf.pdf",
+      "page": "",
+      "standard": "EN 352",
+      "configuration": "PELTIP4-01 UltraFit",
+      "evidence": "FamilySurrogate",
+      "assumption": "UltraFit selected; game tip not independently identified; no Torque substitution"
+    },
+    {
+      "replaces": "comtac-v-proposed",
+      "profileId": "comtac-v-foam-reference",
+      "researchFile": "research-peltor.json",
+      "jsonPointer": "/comtac_v_manual_tables/0",
+      "source": "https://www.manualslib.com/manual/2180471/3m-Peltor-Comtac-V.html?page=4",
+      "page": "4",
+      "standard": "ANSI S3.19",
+      "configuration": "MT20H682 folding headband foam",
+      "evidence": "Measured",
+      "assumption": "Standard foam headband selected; no helmet or gel correction"
+    },
+    {
+      "replaces": "comtac-vi-proposed",
+      "profileId": "comtac-vi-foam-reference",
+      "researchFile": "research-peltor.json",
+      "jsonPointer": "/variants/4/attenuation_options/0",
+      "source": "https://multimedia.3m.com/mws/media/2410397O/3m-defence-and-public-safety-catalogue-emea-english.pdf",
+      "page": "30",
+      "standard": "EN 352",
+      "configuration": "MT20H682FB NIB foam headband",
+      "evidence": "Measured",
+      "assumption": "Standard foam headband selected; no gel or dual protection"
+    },
+    {
+      "replaces": "tep-300-proposed",
+      "profileId": "tep-300-ultrafit-reference",
+      "researchFile": "research-peltor.json",
+      "jsonPointer": "/tep_300_eu_full_table/tables/2",
+      "source": "https://multimedia.3m.com/mws/media/1854243O/3m-peltor-techn-datasheet-tep-300-eu.pdf?fn=DS17043_TEP_300_EU.pdf",
+      "page": "2",
+      "standard": "EN 352-2:2020",
+      "configuration": "EU UltraFit",
+      "evidence": "FamilySurrogate",
+      "assumption": "UltraFit selected as conservative documented tip; game tip unspecified"
+    },
+    {
+      "replaces": "razor-proposed",
+      "profileId": "razor-digital-bt-family-reference",
+      "researchFile": "research-consumer.json",
+      "jsonPointer": "/variants/0/attenuation",
+      "source": "https://manuals.plus/m/4bb12ba42f53510d01bc4c0b1b9c17185b6b4a8e99315e6a0eb70f248dd87582",
+      "page": "1",
+      "standard": "ANSI S3.19-1974",
+      "configuration": "GWP-DRQBT Digital BT",
+      "evidence": "FamilySurrogate",
+      "assumption": "Digital BT family transfer; exact game Digital SKU unverified; missing 8 kHz SD remains unknown"
+    }
+  ],
+  "retained": {
+    "comtac-ii-ansi": "existing exact reference curve",
+    "sordin-pro-x-foam-family": "existing ANSI foam family curve; modern Pro-X not vintage MSA",
+    "cens-proflex-series": "existing electronic module family curve",
+    "rac-proposed": "no frequency table; also explicit AMP fallback",
+    "gssh-proposed": "secondary claims only",
+    "xcel-proposed": "NRR alone is insufficient",
+    "m32-proposed": "Plus table cannot establish ordinary M32 curve",
+    "liberator-proposed": "NRR and ANC claims do not establish passive curve"
+  },
+  "electronics": "Retain proposed dynamics; no documented complete device timing/gain curves. No SPL to dBFS conversion."
+}

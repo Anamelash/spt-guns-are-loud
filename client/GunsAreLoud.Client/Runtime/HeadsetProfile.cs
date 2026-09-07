@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace GunsAreLoud.Client.Runtime
 {
@@ -6,13 +6,23 @@ namespace GunsAreLoud.Client.Runtime
 
     internal sealed class HeadsetPassiveProfile
     {
-        private readonly float[] _frequenciesHz, _meanAttenuationDb, _standardDeviationDb;
+        private readonly float[] _frequenciesHz, _meanAttenuationDb, _standardDeviationDb, _assumedProtectionDb;
         internal readonly string Standard, Source, Page;
         internal readonly HeadsetEvidence CurveEvidence;
 
         internal HeadsetPassiveProfile(float[] frequenciesHz, float[] meanDb, float[] sdDb,
-            string standard, string source, string page, HeadsetEvidence evidence)
+            string standard, string source, string page, HeadsetEvidence evidence, float[] apvDb = null)
         {
+            if (frequenciesHz == null || meanDb == null || frequenciesHz.Length == 0 || frequenciesHz.Length != meanDb.Length)
+                throw new ArgumentException("Passive frequencies and means must have matching nonempty arrays");
+            if ((sdDb != null && sdDb.Length != meanDb.Length) || (apvDb != null && apvDb.Length != meanDb.Length))
+                throw new ArgumentException("Passive uncertainty arrays must match frequency points");
+            for (int i = 0; i < frequenciesHz.Length; i++)
+                if (float.IsNaN(frequenciesHz[i]) || float.IsInfinity(frequenciesHz[i]) || frequenciesHz[i] <= 0 ||
+                    (i > 0 && frequenciesHz[i] <= frequenciesHz[i - 1]) || float.IsNaN(meanDb[i]) ||
+                    float.IsInfinity(meanDb[i]) || meanDb[i] < 0)
+                    throw new ArgumentException("Invalid passive frequency or mean attenuation");
+            _assumedProtectionDb = apvDb == null ? Array.Empty<float>() : (float[])apvDb.Clone();
             _frequenciesHz = (float[])frequenciesHz.Clone();
             _meanAttenuationDb = (float[])meanDb.Clone();
             _standardDeviationDb = sdDb == null ? Array.Empty<float>() : (float[])sdDb.Clone();
@@ -22,7 +32,8 @@ namespace GunsAreLoud.Client.Runtime
         internal int BandCount => _frequenciesHz.Length;
         internal float FrequencyAt(int index) => _frequenciesHz[index];
         internal float MeanAttenuationAt(int index) => _meanAttenuationDb[index];
-        internal float StandardDeviationAt(int index) => index < _standardDeviationDb.Length ? _standardDeviationDb[index] : 0f;
+        internal float StandardDeviationAt(int index) => index < _standardDeviationDb.Length ? _standardDeviationDb[index] : float.NaN;
+        internal float AssumedProtectionAt(int index) => index < _assumedProtectionDb.Length ? _assumedProtectionDb[index] : float.NaN;
     }
 
     internal sealed class HeadsetElectronicsProfile

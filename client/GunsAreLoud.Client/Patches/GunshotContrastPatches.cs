@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Reflection;
 using Audio.ReverbSubsystem;
 using GunsAreLoud.Client.Audio;
@@ -17,8 +17,11 @@ namespace GunsAreLoud.Client.Patches
             yield return AccessTools.Method(typeof(ReverbSuperSource), nameof(ReverbSuperSource.SetMixerGroup));
         }
 
-        private static void Postfix(BetterSource __instance) =>
+        private static void Postfix(BetterSource __instance)
+        {
+            GrenadeAudioRoute.MarkIfEmitting(__instance);
             GunshotContrastController.Instance?.RefreshSourceTree(__instance);
+        }
     }
 
     [HarmonyPatch(typeof(BetterSource), nameof(BetterSource.PlayScheduled))]

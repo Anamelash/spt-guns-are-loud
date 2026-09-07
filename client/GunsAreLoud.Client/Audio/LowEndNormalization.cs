@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using BepInEx.Configuration;
@@ -128,11 +128,11 @@ namespace GunsAreLoud.Client.Audio
                 (float)Math.Sqrt(textureEnergy / (count * 2.0)));
         }
 
-        internal static float Correction(float measured, float target, float percent)
+        internal static float Correction(float measured, float target, float percent, float minimumDb = -12f)
         {
             if (float.IsNaN(measured) || float.IsNaN(target) || float.IsInfinity(measured) ||
                 float.IsInfinity(target) || measured < MinimumRms || target < MinimumRms) return 1f;
-            double db = Math.Max(-12.0, Math.Min(12.0, 20.0 * Math.Log10(target / measured)));
+            double db = Math.Max(minimumDb, Math.Min(12.0, 20.0 * Math.Log10(target / measured)));
             return (float)Math.Pow(10.0, db * Math.Max(0f, Math.Min(150f, percent)) / 2000.0);
         }
 
@@ -153,25 +153,25 @@ namespace GunsAreLoud.Client.Audio
             DecayStartSeconds;
         internal readonly bool Ready, DecayReady, Limited, DecayLimited;
 
-        internal LowEndNormalizationResult(float gain, bool ready, float measured = 0, float target = 0)
+        internal LowEndNormalizationResult(float gain, bool ready, float measured = 0, float target = 0, float minimumBodyDb = -12f)
         {
             Gain = BodyGain = gain; DecayGain = gain; Ready = ready; DecayReady = false;
             MeasuredRms = measured; TargetRms = target; DecayRms = DecayTargetRms = 0f;
             DecayStartSeconds = LowEndLevelModel.WindowSeconds;
             Limited = ready && measured >= LowEndLevelModel.MinimumRms && target > 0 &&
-                Math.Abs(20.0 * Math.Log10(target / measured)) > 12.0;
+                (20.0 * Math.Log10(target / measured) < minimumBodyDb || 20.0 * Math.Log10(target / measured) > 12.0);
             DecayLimited = false;
         }
 
         internal LowEndNormalizationResult(float bodyGain, float decayGain, bool ready, bool decayReady,
             float bodyRms, float bodyTarget, float decayRms, float decayTarget, float decayStartSeconds,
-            bool decayLimited = false)
+            bool decayLimited = false, float minimumBodyDb = -12f)
         {
             Gain = BodyGain = bodyGain; DecayGain = decayGain; Ready = ready; DecayReady = decayReady;
             MeasuredRms = bodyRms; TargetRms = bodyTarget; DecayRms = decayRms; DecayTargetRms = decayTarget;
             DecayStartSeconds = decayStartSeconds;
             Limited = ready && bodyRms >= LowEndLevelModel.MinimumRms && bodyTarget > 0 &&
-                Math.Abs(20.0 * Math.Log10(bodyTarget / bodyRms)) > 12.0;
+                (20.0 * Math.Log10(bodyTarget / bodyRms) < minimumBodyDb || 20.0 * Math.Log10(bodyTarget / bodyRms) > 12.0);
             DecayLimited = decayLimited || (decayReady && decayRms >= LowEndLevelModel.MinimumRms &&
                 decayTarget > 0 && Math.Abs(20.0 * Math.Log10(decayTarget / decayRms)) > 12.0);
         }
@@ -186,7 +186,7 @@ namespace GunsAreLoud.Client.Audio
             internal float[] Pcm;
             internal int Rate, Group;
             internal float Volume;
-            internal float Level;
+            internal float Level, BassLevel;
             internal float DecayLevel;
             internal bool DecayReady;
             internal float NativeBodySeconds;
@@ -264,6 +264,7 @@ namespace GunsAreLoud.Client.Audio
             LowEndDynamicsLevels dynamics = LowEndLevelModel.MeasureDynamics(
                 source.Pcm, source.Rate, _pitch, _high, _low, measurementDecayStart);
             source.Level = dynamics.Body * source.Volume;
+            source.BassLevel = LowEndLevelModel.MeasureBands(source.Pcm, source.Rate, _pitch, _high, _low).Bass * source.Volume;
             source.DecayLevel = dynamics.Decay * source.Volume;
             source.DecayReady = dynamics.DecayReady;
             source.Revision = _revision;
@@ -300,9 +301,13 @@ namespace GunsAreLoud.Client.Audio
             if (!Sources.TryGetValue(id, out Source source) || source.Revision != _revision)
                 return new LowEndNormalizationResult(1f, false);
             float target = LowEndLevelModel.TargetRms(source.Group);
-            float bodyGain = LowEndLevelModel.Correction(source.Level, target, tuning.LowEndNormalizationPercent);
+            // Single pistol variants can have similar full-band peaks but very different bass.
+            // Match measured bass with a scalar only: no new phase-altering playback crossover.
+            float bodyLevel = tuning.NormalizeBass ? source.BassLevel : source.Level;
+            float bodyGain = LowEndLevelModel.Correction(bodyLevel, target, tuning.LowEndNormalizationPercent,
+                tuning.NormalizeBass ? -24f : -12f);
             if (!source.DecayReady)
-                return new LowEndNormalizationResult(bodyGain, true, source.Level, target);
+                return new LowEndNormalizationResult(bodyGain, true, bodyLevel, target, tuning.NormalizeBass ? -24f : -12f);
             float decayTarget = LowEndLevelModel.DecayTargetRms(source.Group);
             float requestedDecay = LowEndLevelModel.Correction(
                 source.DecayLevel, decayTarget, tuning.LowEndNormalizationPercent);
@@ -318,8 +323,8 @@ namespace GunsAreLoud.Client.Audio
             // not replay the composed report's body interval before using decay gain.
             float playbackBodyGain = decayOnly ? decayGain : bodyGain;
             return new LowEndNormalizationResult(playbackBodyGain, decayGain, true, true,
-                source.Level, target, source.DecayLevel, decayTarget, decayStart,
-                Math.Abs(decayGain - requestedDecay) > 0.00001f);
+                bodyLevel, target, source.DecayLevel, decayTarget, decayStart,
+                Math.Abs(decayGain - requestedDecay) > 0.00001f, tuning.NormalizeBass ? -24f : -12f);
         }
 
         internal static void Clear()

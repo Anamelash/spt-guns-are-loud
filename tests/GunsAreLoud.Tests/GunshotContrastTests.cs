@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Reflection;
 using System.Runtime.Serialization;
@@ -130,7 +130,7 @@ namespace GunsAreLoud.Tests
             var config = new ModConfig(new ConfigFile(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".cfg"), false)
                 { SaveOnConfigSet = false });
             TuningSnapshot before = config.GetTuning();
-            Assert.That(config.GunshotContrastDb.Value, Is.EqualTo(6));
+            Assert.That(config.GunshotContrastDb.Value, Is.EqualTo(8));
             config.GunshotContrastDb.Value = 100;
             Assert.That(config.GunshotContrastDb.Value, Is.EqualTo(18));
             config.GunshotContrastDb.Value = 0;

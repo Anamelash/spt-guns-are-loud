@@ -1,10 +1,11 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using GunsAreLoud.Client.Configuration;
 
 namespace GunsAreLoud.Client.Runtime
 {
     internal readonly struct LocalGunshotAudioTuning
     {
+        internal readonly bool NormalizeBass;
         internal readonly float DirectBoostDb;
         internal readonly float DirectBodyGain;
         internal readonly float PressureFrequencyHz;
@@ -52,8 +53,9 @@ namespace GunsAreLoud.Client.Runtime
             AutomaticTailMode automaticTailMode = AutomaticTailMode.FullReportPerShot,
             float lowEndNormalizationPercent = 0f,
             float caliberContrastPercent = 100f,
-            IndoorHeadphonesDamping headphonesDamping = default)
+            IndoorHeadphonesDamping headphonesDamping = default, bool normalizeBass = false)
         {
+            NormalizeBass = normalizeBass;
             DirectBoostDb = directBoostDb;
             DirectBodyGain = directBodyGain;
             PressureFrequencyHz = pressureFrequencyHz;

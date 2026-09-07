@@ -1,9 +1,17 @@
 # Guns Are Loud
 
-Gunfire should dominate the soundscape, not blend into it. Guns Are Loud keeps EFT's weapon recordings, timing, occlusion, and room acoustics, then gives first-person shots more physical weight, clearer caliber differences, stronger indoor presence, and a temporary effect on the player's hearing.
+Guns Are Loud keeps EFT's weapon recordings and gives first-person shots more weight, clearer caliber differences, stronger indoor presence, and temporary hearing loss and ringing. Active headsets combine passive isolation with an electronic listening path; grenade blasts also pass through the headset model and can affect hearing for much longer than gunfire.
 
-Version 0.19.0 retunes the default gunshot balance for a fuller, heavier report and clearer differences between weapon families. It also adds active-headset processing based on passive isolation and electronic sound reproduction, so headsets react to loud events instead of acting as a static EQ preset.
+The mod includes headset profiles drawn from a documented reference, support for identified modded headset variants, distance- and barrier-dependent blast exposure, and separate intensity and duration controls for shot and explosion effects. Close blasts can cause prolonged hearing loss with a plateau followed by gradual recovery.
 
-The mod changes only the local player's first-person perception. It does not alter ballistics, damage, AI hearing, other characters' gunshots, or EFT's original sound assets.
+F12 is organized into General, Gunshots, Explosions, and Low-level & debug. Enable Advanced to see the low-level controls. General offers Vanilla and Realistic headset processing. Headset inspection shows the corresponding compressor values; Realistic also shows passive attenuation averaged into low, mid, and high bands. An asterisk identifies an approximation or transferred family profile.
 
-Read [CHANGELOG.md](CHANGELOG.md) for the release highlights and [MODEL.md](MODEL.md) for the physical model and its limitations.
+The mod changes the local player's sound and perception. It does not alter ballistics, damage, AI hearing, remote gunshot sources, or EFT's original sound assets. Headset characteristics are supplied on the client; no server-side item changes are required. Unknown headsets or unavailable processing routes fall back to Vanilla.
+
+Read [CHANGELOG.md](CHANGELOG.md) for the player-visible differences from vanilla, [MODEL.md](MODEL.md) for the calculations and limitations, and the [headset reference](docs/reference/headphones/README.md) for source data and calibration choices. The model uses relative digital levels, not calibrated real-world sound pressure.
+
+## Installation
+
+The client archive targets SPT 4.1.3. With the game closed, extract it into the SPT installation root so that `GunsAreLoud.Client.dll` is under `BepInEx/plugins/GunsAreLoud`. Existing configuration files are preserved.
+
+**The client archive alone does not activate Realistic headset processing.** It requires the native GAL audio effect to be registered before Unity starts. Without that prerequisite, headset audio uses Vanilla fallback. The [native registration tooling](build/headphones/README.md) is locked to the development installation and is not a portable end-user installer. Gunshot and explosion hearing features do not require that native headset effect.

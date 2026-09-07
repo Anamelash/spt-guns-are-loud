@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics;
 using UnityEngine;
 using UnityEngine.Audio;
@@ -84,7 +84,7 @@ namespace GunsAreLoud.Client.Audio
             AudioMixerGroup group = source.outputAudioMixerGroup;
             GunshotContrastFilter filter = source.GetComponent<GunshotContrastFilter>();
             string groupName = group != null ? group.name : null;
-            if (!_active || !GunshotContrastModel.ShouldAttenuate(groupName))
+            if (!_active || (!GunshotContrastModel.ShouldAttenuate(groupName) || GrenadeAudioRoute.IsExplosion(source)))
             {
                 if (filter != null) filter.Bind(_state, false);
                 return;
@@ -112,7 +112,7 @@ namespace GunsAreLoud.Client.Audio
             }
             entry.Source.GetComponents(_layout);
             entry.Filter.Bind(_state, GunshotContrastModel.SafeSourceLayout(_layout.Count) &&
-                GunshotContrastModel.ShouldAttenuate(entry.GroupName));
+                GunshotContrastModel.ShouldAttenuate(entry.GroupName) && !GrenadeAudioRoute.IsExplosion(entry.Source));
         }
 
         private void Remove(LinkedListNode<Entry> node)

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using BepInEx.Configuration;
 using GunsAreLoud.Client.Audio;
@@ -62,7 +62,7 @@ namespace GunsAreLoud.Tests
             return pcm;
         }
 
-        private LocalGunshotAudioTuning AudioTuning()
+        private LocalGunshotAudioTuning AudioTuning(bool normalizeBass = false)
         {
             TuningSnapshot t = _config.GetTuning();
             return new LocalGunshotAudioTuning(0, 0.3f, 99, GunshotLowEndMode.PitchedCopy,
@@ -70,7 +70,28 @@ namespace GunsAreLoud.Tests
                 t.PitchedLayerHighpassHz, t.PitchedLayerLowpassHz, t.PitchedLayerFadePercent,
                 t.AutomaticPitchedTailSeconds, t.PitchedLayerGainDb, t.PitchedLayerOcclusion,
                 t.PitchedLayerOccludedLowpassHz, 0.08f, false, 0, 0, 0, 0,
-                t.AutomaticTailMode, t.LowEndNormalizationPercent, t.CaliberContrastPercent);
+                t.AutomaticTailMode, t.LowEndNormalizationPercent, t.CaliberContrastPercent, normalizeBass: normalizeBass);
+        }
+
+        [Test]
+        public void AlternatingPistolVariantsMatchBassDespiteDifferentSpectralBalance()
+        {
+            _config.PitchedLayerHighpassHz.Value = 10;
+            _config.PitchedLayerLowpassHz.Value = 2000;
+            float[] a = Tone(.8f, 150), b = Tone(.4f, 150), texture = Tone(.5f, 1600);
+            for (int i = 0; i < a.Length; i++) { a[i] += texture[i]; b[i] += texture[i]; }
+            LowEndNormalizationCache.Register(1, Rate, a, 1, 0);
+            LowEndNormalizationCache.Register(2, Rate, b, 1, 0);
+            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            var first = LowEndNormalizationCache.Evaluate(1, AudioTuning(true));
+            var second = LowEndNormalizationCache.Evaluate(2, AudioTuning(true));
+            Assert.That(first.Ready && second.Ready, Is.True);
+            Assert.That(first.MeasuredRms * first.BodyGain, Is.EqualTo(.1f).Within(.0001));
+            Assert.That(second.MeasuredRms * second.BodyGain, Is.EqualTo(.1f).Within(.0001));
+            Assert.That(first.BodyGain, Is.LessThan(second.BodyGain));
+            Assert.That(first.Limited || second.Limited, Is.False);
+            Assert.That(LowEndNormalizationCache.Evaluate(1, AudioTuning(false)).BodyGain,
+                Is.Not.EqualTo(first.BodyGain), "rifle/automatic calibration must retain its wide-band path");
         }
 
         private void RegisterPair()
@@ -443,7 +464,7 @@ namespace GunsAreLoud.Tests
             Assert.That(release.LowEndNormalizationPercent.Value, Is.EqualTo(100));
             Assert.That(release.CaliberContrastPercent.Value, Is.EqualTo(200));
             Assert.That(release.PitchedLayerLowpassHz.Value, Is.EqualTo(2000));
-            Assert.That(release.AutomaticPitchedTailMs.Value, Is.EqualTo(400));
+            Assert.That(release.AutomaticPitchedTailMs.Value, Is.EqualTo(30));
             Assert.That(((AcceptableValueRange<float>)release.LowEndNormalizationPercent.Description.AcceptableValues).MaxValue, Is.EqualTo(150));
             Assert.That(((AcceptableValueRange<float>)release.CaliberContrastPercent.Description.AcceptableValues).MaxValue, Is.EqualTo(300));
             Assert.That(((AcceptableValueRange<float>)release.PitchedLayerLowpassHz.Description.AcceptableValues).MaxValue, Is.EqualTo(3000));

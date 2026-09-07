@@ -1,12 +1,33 @@
-# Changelog
+# Changes from vanilla
 
-## 0.19.0
+## Gunfire
 
-- The default gunshot balance is fuller and heavier while retaining the less punishing recovery of the `Balanced` profile.
-- Weapon families are more clearly separated: rifle cartridges carry more low-end authority than pistol cartridges without replacing EFT's original recordings.
-- The added body layer preserves more of each recording's character and reacts more strongly when the weapon sound is obstructed.
-- Temporary hearing loss, tinnitus, and the left/right difference between shoulder stances are slightly more pronounced by default.
-- Active headsets now combine passive isolation with an electronic listening path. Loud gunfire suppresses the amplified outside sound, then footsteps, speech, and ambience return smoothly as the headset recovers.
-- Different headset families can color and attenuate the outside world differently. Unsupported equipment safely retains EFT's original headset behavior.
+- Your first-person shots have a fuller low end and more pronounced impact, while retaining EFT's original weapon recordings.
+- Cartridge families sound more distinct: rifle rounds carry more low-end weight than pistol rounds, and suppressors reduce the added impact.
+- Automatic fire adds weight to each shot throughout a burst.
+- Indoor shots have a stronger room presence and cause greater hearing exposure.
+- Gunfire stands out more against footsteps, speech, and ambience. The contrast control lowers these competing sounds.
 
-These changes affect only first-person sound and perception. Gameplay mechanics, AI hearing, remote gunshots, and the original EFT sound assets remain unchanged.
+## Hearing loss and ringing
+
+- Your shots cause temporary muffling and ringing. Sustained fire builds up exposure and takes longer to recover from.
+- Shoulder-fired weapons affect the two ears differently; switching shoulders mirrors the difference. Pistols produce a smaller difference.
+- Nearby grenade explosions can cause much stronger, longer-lasting hearing loss and ringing. A close blast can leave hearing heavily reduced for several minutes.
+- Blast effects weaken with distance, more quickly outdoors than indoors. Walls and other obstacles shielding your head from the blast reduce their strength.
+- Severe blast effects hold for the first half of their duration, then gradually fade over the second half. The initial explosion is allowed to sound before the hearing loss develops.
+
+## Active headsets
+
+- Realistic mode combines frequency-dependent passive isolation with amplified electronic listening. Loud events suppress the electronic path; quiet surroundings return as it recovers.
+- Headset models differ in how they attenuate and color outside sound. Profiles use published attenuation data where applicable, with identified approximations where measurements are unavailable.
+- The headset path processes world audio, including gunfire and grenade explosions. Headset protection also reduces hearing exposure.
+- Supported modded headset variants use the corresponding profiles. Ops-Core AMP variants use the FAST RAC profile; unknown models retain Vanilla processing.
+- Inspection shows average passive attenuation for low, mid, and high frequencies, plus compressor release and gain. Vanilla mode shows only release and gain. An asterisk marks an approximation or a transferred family profile.
+
+## Controls
+
+- F12 offers Vanilla and Realistic headset modes, headset fit, gunshot balance, and separate hearing-loss and ringing intensity/duration controls for gunshots and explosions.
+- Close-blast duration, outdoor radius, and indoor radius multiplier can be adjusted separately.
+- Settings are grouped into General, Gunshots, Explosions, and Low-level & debug. Advanced reveals the low-level controls.
+
+These changes affect the local player's sound and perception. Ballistics, damage, AI hearing, and EFT's original sound assets are unchanged.

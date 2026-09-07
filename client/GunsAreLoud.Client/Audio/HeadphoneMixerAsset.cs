@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
@@ -102,9 +102,17 @@ namespace GunsAreLoud.Client.Audio
                         {
                             string name = line.Substring(10);
                             if (!original.GetFloat(name, out float before) || !candidate.GetFloat(name, out float after) ||
-                                float.IsNaN(before) || float.IsNaN(after) || float.IsInfinity(before) || float.IsInfinity(after) ||
-                                Math.Abs(before - after) > 0.0001f + Math.Abs(before) * 0.00001f)
-                                throw new InvalidOperationException("stock mixer default mismatch: " + name);
+                                float.IsNaN(before) || float.IsNaN(after) || float.IsInfinity(before) || float.IsInfinity(after))
+                                throw new InvalidOperationException("stock mixer parameter unavailable/nonfinite: " + name);
+                            // The original asset may already carry settings from the menu (e.g. Chat).
+                            // Transfer only differing live values; overriding all parameters would freeze snapshots.
+                            if (!HeadphoneMixerLiveState.Equivalent(before, after))
+                            {
+                                if (!candidate.SetFloat(name, before) || !candidate.GetFloat(name, out float copied) ||
+                                    !HeadphoneMixerLiveState.Equivalent(before, copied))
+                                    throw new InvalidOperationException("stock mixer state transfer failed: " + name);
+                                Plugin.Log?.LogInfo($"Headphone mixer live setting transferred: {name} {after:R} -> {before:R}");
+                            }
                             parameters++;
                         }
                         else if (line.StartsWith("snapshot|", StringComparison.Ordinal))

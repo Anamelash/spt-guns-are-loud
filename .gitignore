@@ -15,3 +15,7 @@ docs/internal/
 
 # Local implementation blueprints
 blueprints/
+
+# Local extracted game recordings and analysis scratch files
+samples/
+tmp/

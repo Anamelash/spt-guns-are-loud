@@ -1,0 +1,1021 @@
+{
+  "metadata": {
+    "checked": "2026-09-07",
+    "purpose": "manufacturer/laboratory reference; not Unity dBFS/EQ",
+    "rules": [
+      "APV only when printed",
+      "NRR/SNR/HML not interchangeable",
+      "unknown is explicit"
+    ]
+  },
+  "variants": [
+    {
+      "family": "ComTac II",
+      "model": "MT15H69FB-**",
+      "sourceURL": "https://www.comhead.de/media/pdf/b5/5b/9c/00172_Peltor_Comtac_XP_XS_Anleitung_1268754380.pdf",
+      "page": 2,
+      "source_variant": "folding headband, 343 g",
+      "applicability": "ComTac II table; not ComTac XS table on same page",
+      "standard": "NRR/CSA; EN 352-4:2001, EN 352-6:2002, EN 352-1:2002",
+      "attenuation": {
+        "frequencies_hz": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          3150,
+          4000,
+          6300,
+          8000
+        ],
+        "mean_db": [
+          14.5,
+          17.7,
+          26.3,
+          31.3,
+          29.8,
+          36.7,
+          35.1,
+          37.5,
+          35.4
+        ],
+        "sd_db": [
+          3.0,
+          2.9,
+          2.8,
+          2.6,
+          3.2,
+          2.7,
+          2.5,
+          2.8,
+          3.0
+        ],
+        "apv_db": null,
+        "rating": {
+          "NRR_db": 21,
+          "CSA_class": "B"
+        }
+      },
+      "specs": [
+        {
+          "name": "battery_life",
+          "value": 250,
+          "unit": "h",
+          "status": "claim"
+        },
+        {
+          "name": "audio_limit",
+          "value": 82,
+          "unit": "dB(A) equivalent average",
+          "status": "safety limit, not output ceiling"
+        },
+        {
+          "name": "gain_eq_latency_attack_release_ip",
+          "value": null,
+          "unit": null,
+          "status": "unknown"
+        },
+        {
+          "name": "published_transfer_graphs",
+          "value": {
+            "B3": "A-weighted external versus under-cup level",
+            "B4": "electrical input versus permitted hours/day; X=390.5 mV",
+            "B5": "AUX mVrms versus under-cup dBA"
+          },
+          "sourceURL": "https://www.comhead.de/media/pdf/b5/5b/9c/00172_Peltor_Comtac_XP_XS_Anleitung_1268754380.pdf",
+          "pages": [
+            2,
+            9
+          ],
+          "status": "manufacturer manual graphs, visually inspected; not digitized; exact test configuration still required"
+        },
+        {
+          "name": "storage_upper_temperature",
+          "value": 55,
+          "unit": "degC",
+          "sourceURL": "https://www.comhead.de/media/pdf/b5/5b/9c/00172_Peltor_Comtac_XP_XS_Anleitung_1268754380.pdf",
+          "page": 10,
+          "status": "manual limit; not operating temperature"
+        },
+        {
+          "name": "external_audio_priority",
+          "value": "ambient amplification reduced while external audio input is present; external input works without batteries",
+          "sourceURL": "https://www.comhead.de/media/pdf/b5/5b/9c/00172_Peltor_Comtac_XP_XS_Anleitung_1268754380.pdf",
+          "page": 8,
+          "status": "manufacturer functional description"
+        }
+      ]
+    },
+    {
+      "family": "Tactical Sport/SportTac",
+      "model": "MT16H210F-*",
+      "sourceURL": "https://multimedia.3m.com/mws/media/940033O/fp3584-sporttac-pdf.pdf?fn=FP3584_SportTac.pdf",
+      "page": 1,
+      "source_variant": "SportTac, 318 g",
+      "applicability": "transfer to game Tactical Sport requires SKU verification",
+      "standard": "SNR/H/M/L",
+      "attenuation": {
+        "frequencies_hz": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "mean_db": [
+          12.1,
+          17.9,
+          27.0,
+          26.8,
+          30.5,
+          38.3,
+          36.4
+        ],
+        "sd_db": [
+          4.3,
+          3.1,
+          3.8,
+          3.0,
+          3.0,
+          3.7,
+          5.4
+        ],
+        "apv_db": [
+          7.8,
+          14.8,
+          23.2,
+          23.8,
+          27.5,
+          34.6,
+          31.0
+        ],
+        "rating": {
+          "SNR_db": 26,
+          "H_db": 29,
+          "M_db": 23,
+          "L_db": 16
+        }
+      },
+      "specs": [
+        {
+          "name": "criterion_level",
+          "value": {
+            "H": 113,
+            "M": 104,
+            "L": 91
+          },
+          "unit": "dB(A)",
+          "status": "input criterion, not output ceiling"
+        },
+        {
+          "name": "gain_eq_latency_attack_release_ip",
+          "value": null,
+          "unit": null,
+          "status": "unknown"
+        }
+      ]
+    },
+    {
+      "family": "ComTac IV Hybrid",
+      "model": "MT16H044F-38/-86/-88 GN",
+      "sourceURL": "https://multimedia.3m.com/mws/media/1142194O/3m-peltor-comtac-iv-headset-datasheet-pdf.pdf",
+      "page": null,
+      "source_variant": "olive green; UltraFit/Torque eartip dependent",
+      "applicability": "listed variants only",
+      "standard": "EN 352-1:2002; MIL-STD-810F; EMC-MIL-STD-461F",
+      "attenuation_options": [
+        {
+          "variant": "PELTIP4-01 UltraFit",
+          "frequencies_hz": [
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "mean_db": [
+            28.6,
+            27.0,
+            30.3,
+            29.2,
+            30.9,
+            31.6,
+            32.0
+          ],
+          "sd_db": [
+            5.3,
+            6.0,
+            6.0,
+            5.4,
+            3.4,
+            6.6,
+            4.5
+          ],
+          "apv_db": [
+            23.3,
+            21.0,
+            24.4,
+            23.8,
+            27.4,
+            25.1,
+            27.6
+          ],
+          "rating": {
+            "SNR_db": 27,
+            "H_db": 26,
+            "M_db": 25,
+            "L_db": 23
+          }
+        },
+        {
+          "variant": "PELTIP5-01 Torque",
+          "frequencies_hz": [
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "mean_db": [
+            31.0,
+            29.5,
+            31.4,
+            33.9,
+            33.7,
+            40.0,
+            42.4
+          ],
+          "sd_db": [
+            4.9,
+            4.6,
+            5.2,
+            5.5,
+            3.6,
+            2.5,
+            3.4
+          ],
+          "apv_db": [
+            26.1,
+            24.9,
+            26.3,
+            28.4,
+            30.1,
+            37.4,
+            38.9
+          ],
+          "rating": {
+            "SNR_db": 32,
+            "H_db": 32,
+            "M_db": 29,
+            "L_db": 27
+          }
+        }
+      ],
+      "specs": [
+        {
+          "name": "weight",
+          "value": 238,
+          "unit": "g incl batteries",
+          "status": "claim"
+        },
+        {
+          "name": "battery_life",
+          "value": 250,
+          "unit": "h",
+          "status": "claim"
+        },
+        {
+          "name": "gain_eq_latency_attack_release",
+          "value": null,
+          "unit": null,
+          "status": "unknown"
+        }
+      ]
+    },
+    {
+      "family": "ComTac V/XPI",
+      "model": "MT20H682FB-* / MT20H682BB-*",
+      "sourceURL": "https://multimedia.3m.com/mws/media/2367227O/3m-peltor-comtac-xpi-headset-datasheet-emea.pdf",
+      "page": null,
+      "source_variant": "XPI datasheet; FB foam and BB tables",
+      "applicability": "do not silently label every US ComTac V equivalent",
+      "standard": "SNR/H/M/L",
+      "attenuation_options": [
+        {
+          "variant": "FB foam",
+          "frequencies_hz": [
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "mean_db": [
+            11.5,
+            17.9,
+            27.8,
+            30.0,
+            32.1,
+            36.2,
+            40.3
+          ],
+          "sd_db": [
+            2.5,
+            2.7,
+            1.8,
+            2.3,
+            3.0,
+            2.0,
+            3.1
+          ],
+          "apv_db": [
+            9.0,
+            15.3,
+            25.9,
+            27.7,
+            29.1,
+            34.2,
+            37.2
+          ],
+          "rating": {
+            "SNR_db": 28,
+            "H_db": 31,
+            "M_db": 25,
+            "L_db": 18
+          }
+        },
+        {
+          "variant": "BB",
+          "frequencies_hz": [
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "mean_db": [
+            16.6,
+            16.8,
+            27.4,
+            32.1,
+            33.1,
+            33.0,
+            36.1
+          ],
+          "sd_db": [
+            1.8,
+            2.3,
+            2.2,
+            2.1,
+            3.2,
+            2.9,
+            3.2
+          ],
+          "apv_db": [
+            14.8,
+            14.5,
+            25.2,
+            30.0,
+            29.9,
+            30.1,
+            32.9
+          ],
+          "rating": {
+            "SNR_db": 28,
+            "H_db": 31,
+            "M_db": 25,
+            "L_db": 18
+          }
+        }
+      ],
+      "specs": [
+        {
+          "name": "battery_life",
+          "value": 200,
+          "unit": "h",
+          "status": "XPI claim"
+        },
+        {
+          "name": "gain_eq_latency_attack_release_output_ceiling",
+          "value": null,
+          "unit": null,
+          "status": "unknown"
+        }
+      ]
+    },
+    {
+      "family": "ComTac VI NIB",
+      "model": "MT20H682FB-*N*",
+      "sourceURL": "https://multimedia.3m.com/mws/media/2410397O/3m-defence-and-public-safety-catalogue-emea-english.pdf",
+      "page": 30,
+      "source_variant": "foldable headband; foam, HY80 gel, or E-A-R Classic dual protection",
+      "applicability": "VI NIB only; cushion is part of variant",
+      "standard": "SNR/H/M/L",
+      "attenuation_options": [
+        {
+          "variant": "foam",
+          "frequencies_hz": [
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "mean_db": [
+            11.6,
+            17.6,
+            30.5,
+            29.7,
+            29.4,
+            32.8,
+            38.3
+          ],
+          "sd_db": [
+            2.3,
+            2.1,
+            2.9,
+            2.3,
+            3.2,
+            2.1,
+            4.8
+          ],
+          "apv_db": [
+            9.3,
+            15.5,
+            27.6,
+            27.4,
+            26.2,
+            30.7,
+            33.5
+          ],
+          "rating": {
+            "H_db": 31.2,
+            "M_db": 26.7,
+            "L_db": 18.9,
+            "SNR_db": 28.5
+          },
+          "weight_g": 358
+        },
+        {
+          "variant": "HY80 gel",
+          "frequencies_hz": [
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "mean_db": [
+            15.1,
+            18.2,
+            26.2,
+            32.2,
+            30.4,
+            29.3,
+            36.7
+          ],
+          "sd_db": [
+            3.4,
+            3.0,
+            2.2,
+            2.5,
+            3.7,
+            3.7,
+            4.0
+          ],
+          "apv_db": [
+            11.7,
+            15.2,
+            24.0,
+            29.7,
+            26.7,
+            25.6,
+            32.7
+          ],
+          "rating": {
+            "H_db": 30.4,
+            "M_db": 27.1,
+            "L_db": 20.8,
+            "SNR_db": 28.6
+          },
+          "weight_g": 403
+        },
+        {
+          "variant": "E-A-R Classic dual",
+          "frequencies_hz": [
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "mean_db": [
+            31.8,
+            39.5,
+            52.5,
+            43.8,
+            40.8,
+            50.8,
+            46.4
+          ],
+          "sd_db": [
+            8.6,
+            9.3,
+            8.2,
+            5.1,
+            5.0,
+            3.1,
+            3.9
+          ],
+          "apv_db": [
+            23.2,
+            30.2,
+            44.3,
+            38.8,
+            35.8,
+            47.7,
+            42.5
+          ],
+          "rating": {
+            "H_db": 42.4,
+            "M_db": 41.8,
+            "L_db": 38.3,
+            "SNR_db": 42.9
+          },
+          "weight_g": 358
+        }
+      ],
+      "specs": [
+        {
+          "name": "NIB_frequency",
+          "value": [
+            915.5,
+            864
+          ],
+          "unit": "MHz regional/dual",
+          "status": "claim"
+        },
+        {
+          "name": "NIB_range",
+          "value": 30,
+          "unit": "ft line-of-sight",
+          "status": "communication claim"
+        },
+        {
+          "name": "gain_eq_latency_attack_release_output_ceiling",
+          "value": null,
+          "unit": null,
+          "status": "unknown"
+        }
+      ]
+    },
+    {
+      "family": "TEP-300",
+      "model": "TEP-300 US/AC",
+      "sourceURL": "https://multimedia.3m.com/mws/media/2208992O/3m-peltor-technical-data-specification-tep-300-usac.pdf",
+      "page": null,
+      "source_variant": "US tables by tip",
+      "applicability": "US only; NRR not EU SNR",
+      "standard": "ANSI S3.19-1974 NRR",
+      "attenuation_options": [
+        {
+          "tip": "CCC-GRM-25",
+          "frequencies_hz": [
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            3150,
+            4000,
+            6300,
+            8000
+          ],
+          "mean_db": [
+            35.0,
+            31.8,
+            37.4,
+            37.4,
+            36.0,
+            39.2,
+            40.4,
+            44.9,
+            45.8
+          ],
+          "sd_db": [
+            4.6,
+            4.2,
+            5.2,
+            5.1,
+            3.3,
+            4.9,
+            4.8,
+            3.6,
+            2.9
+          ],
+          "apv_db": null,
+          "rating": {
+            "NRR_db": 27
+          }
+        },
+        {
+          "tip": "Skull Screw",
+          "frequencies_hz": [
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            3150,
+            4000,
+            6300,
+            8000
+          ],
+          "mean_db": [
+            35.7,
+            35.0,
+            40.7,
+            39.0,
+            38.3,
+            41.7,
+            41.4,
+            44.0,
+            45.9
+          ],
+          "sd_db": [
+            5.4,
+            5.2,
+            5.4,
+            3.9,
+            2.5,
+            4.4,
+            3.7,
+            4.1,
+            4.1
+          ],
+          "apv_db": null,
+          "rating": {
+            "NRR_db": 30
+          }
+        },
+        {
+          "tip": "UltraFit",
+          "frequencies_hz": [
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            3150,
+            4000,
+            6300,
+            8000
+          ],
+          "mean_db": [
+            34.3,
+            31.9,
+            35.2,
+            34.1,
+            34.5,
+            38.6,
+            35.5,
+            38.2,
+            39.3
+          ],
+          "sd_db": [
+            6.1,
+            6.1,
+            6.1,
+            5.2,
+            4.8,
+            4.4,
+            3.9,
+            3.9,
+            3.0
+          ],
+          "apv_db": null,
+          "rating": {
+            "NRR_db": 23
+          }
+        }
+      ],
+      "specs": [
+        {
+          "name": "gain_eq_latency_attack_release_output_ceiling_ip",
+          "value": null,
+          "unit": null,
+          "status": "unknown"
+        }
+      ]
+    },
+    {
+      "family": "TEP-300",
+      "model": "TEP-300 EU",
+      "sourceURL": "https://multimedia.3m.com/mws/media/1854243O/3m-peltor-techn-datasheet-tep-300-eu.pdf?fn=3M-PELTOR-Techn-Datasheet-TEP-300-EU_R1.pdf",
+      "page": null,
+      "source_variant": "EU in-ear configuration",
+      "applicability": "EU sheet only",
+      "standard": "EN 352-2:2020",
+      "attenuation": {
+        "frequencies_hz": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "mean_db": [
+          38.1,
+          35.5,
+          40.7,
+          40.9,
+          37.5,
+          40.3,
+          44.9
+        ],
+        "sd_db": null,
+        "apv_db": null,
+        "rating": {
+          "H_db": 38.4,
+          "M_db": 38.5,
+          "L_db": 37.5,
+          "SNR_db": 39.7
+        }
+      },
+      "specs": [
+        {
+          "name": "mass",
+          "value": 11,
+          "unit": "g",
+          "status": "claim"
+        },
+        {
+          "name": "gain_eq_latency_attack_release_output_ceiling_ip",
+          "value": null,
+          "unit": null,
+          "status": "unknown"
+        }
+      ]
+    }
+  ],
+  "comtac_v_manual_tables": [
+    {
+      "sourceURL": "https://www.manualslib.com/manual/2180471/3m-Peltor-Comtac-V.html?page=4",
+      "page": 4,
+      "source_variant": "ComTac V MT20H682; folding headband with foam cushion; US manual",
+      "applicability": "laboratory table; not helmet-mounted",
+      "frequencies_hz": [
+        125,
+        250,
+        500,
+        1000,
+        2000,
+        3150,
+        4000,
+        6300,
+        8000
+      ],
+      "mean_db": [
+        13.6,
+        17.7,
+        28.8,
+        31.9,
+        32.3,
+        39.3,
+        39.9,
+        42.1,
+        41.4
+      ],
+      "sd_db": null,
+      "apv_db": null,
+      "rating": {
+        "NRR_db": 23,
+        "CSA_class": "B"
+      },
+      "note": "Manual OCR exposes SD values but page layout does not preserve their row mapping reliably; left null rather than guess."
+    },
+    {
+      "sourceURL": "https://www.manualslib.com/manual/2180471/3m-Peltor-Comtac-V.html?page=4",
+      "page": 4,
+      "source_variant": "ComTac V MT20H682; helmet attachment with foam cushion; Ceradyne helmet test",
+      "applicability": "helmet/fit transfer only; not generic headband",
+      "frequencies_hz": [
+        125,
+        250,
+        500,
+        1000,
+        2000,
+        3150,
+        4000,
+        6300,
+        8000
+      ],
+      "mean_db": [
+        20.3,
+        26.4,
+        32.1,
+        33.0,
+        33.4,
+        39.7,
+        34.1,
+        39.4,
+        40.1
+      ],
+      "sd_db": null,
+      "apv_db": null,
+      "rating": {
+        "NRR_db": 22,
+        "CSA_class": "A"
+      },
+      "note": "Helmet table is explicitly tested with 3M Ceradyne ballistic helmet; values are not a mount-independent ComTac V EQ."
+    }
+  ],
+  "tep_300_eu_full_table": {
+    "sourceURL": "https://multimedia.3m.com/mws/media/1854243O/3m-peltor-techn-datasheet-tep-300-eu.pdf?fn=DS17043_TEP_300_EU.pdf",
+    "page": 2,
+    "standard": "EN 352-2:2020",
+    "tables": [
+      {
+        "variant": "Skull Screw / Torque",
+        "frequencies_hz": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "mean_db": [
+          38.1,
+          35.5,
+          40.7,
+          40.9,
+          37.5,
+          40.3,
+          44.9
+        ],
+        "sd_db": [
+          5.4,
+          5.4,
+          5.7,
+          5.8,
+          3.2,
+          3.3,
+          4.2
+        ],
+        "apv_db": [
+          32.7,
+          30.1,
+          35.0,
+          35.1,
+          34.3,
+          37.0,
+          40.7
+        ],
+        "rating": {
+          "H_db": 38.4,
+          "M_db": 38.5,
+          "L_db": 37.5,
+          "SNR_db": 39.7
+        }
+      },
+      {
+        "variant": "CCC-GRM-25",
+        "frequencies_hz": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "mean_db": [
+          35.1,
+          32.5,
+          37.5,
+          37.9,
+          37.1,
+          40.8,
+          44.6
+        ],
+        "sd_db": [
+          5.5,
+          4.9,
+          5.1,
+          4.8,
+          4.3,
+          4.6,
+          4.7
+        ],
+        "apv_db": [
+          29.6,
+          27.6,
+          32.4,
+          33.1,
+          32.8,
+          36.2,
+          39.9
+        ],
+        "rating": {
+          "H_db": 38.0,
+          "M_db": 36.9,
+          "L_db": 34.9,
+          "SNR_db": 38.5
+        }
+      },
+      {
+        "variant": "UltraFit",
+        "frequencies_hz": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "mean_db": [
+          32.8,
+          30.2,
+          31.6,
+          31.2,
+          33.0,
+          34.4,
+          37.9
+        ],
+        "sd_db": [
+          6.2,
+          4.5,
+          5.4,
+          4.4,
+          4.0,
+          4.8,
+          3.9
+        ],
+        "apv_db": [
+          26.6,
+          25.7,
+          26.2,
+          26.8,
+          29.0,
+          29.6,
+          34.0
+        ],
+        "rating": {
+          "H_db": 33.1,
+          "M_db": 31.4,
+          "L_db": 30.8,
+          "SNR_db": 33.4
+        }
+      }
+    ]
+  },
+  "corrections_and_graph_records": {
+    "ComTac II": {
+      "audio_limit_field_correction": "The B4/B5 AUX material is a graph of input/usage and AUX mVrms to inner dB(A), not a global 82 dB(A) peak or digital output ceiling.",
+      "graphs": ["B3 Noise levels: outside-to-inside dB(A) relationship", "B4 Input signal/usage time", "B5 AUX input mVrms to inside dB(A)"],
+      "graph_values_digitized": false,
+      "sourceURL": "https://www.comhead.de/media/pdf/b5/5b/9c/00172_Peltor_Comtac_XP_XS_Anleitung_1268754380.pdf",
+      "page": 2
+    },
+    "TEP_300_EU_rating_rows": {
+      "sourceURL": "https://multimedia.3m.com/mws/media/1854243O/3m-peltor-techn-datasheet-tep-300-eu.pdf?fn=DS17043_TEP_300_EU.pdf",
+      "tables": [
+        {"variant":"Skull Screw / Torque","rating_mean_db":{"H":38.4,"M":38.5,"L":37.5,"SNR":39.7},"rating_sd_db":{"H":2.5,"M":3.1,"L":4.1,"SNR":2.6},"rating_apv_db":{"H":36,"M":35,"L":33,"SNR":37}},
+        {"variant":"CCC-GRM-25","rating_mean_db":{"H":38.0,"M":36.9,"L":34.9,"SNR":38.5},"rating_sd_db":{"H":3.4,"M":3.6,"L":4.0,"SNR":3.3},"rating_apv_db":{"H":35,"M":33,"L":31,"SNR":35}},
+        {"variant":"UltraFit","rating_mean_db":{"H":33.1,"M":31.4,"L":30.8,"SNR":33.4},"rating_sd_db":{"H":3.5,"M":3.7,"L":4.0,"SNR":3.5},"rating_apv_db":{"H":30,"M":28,"L":27,"SNR":30}}
+      ]
+    },
+    "ComTac_VI_rating_rows": {
+      "sourceURL":"https://multimedia.3m.com/mws/media/2410397O/3m-defence-and-public-safety-catalogue-emea-english.pdf",
+      "page":30,
+      "note":"H/M/L/SNR columns have their own MV/SD/APV rows; do not treat MV rating values as APV.",
+      "tables":[
+        {"variant":"foam","mean_db":{"H":31.2,"M":26.7,"L":18.9,"SNR":28.5},"sd_db":{"H":2.8,"M":1.5,"L":1.7,"SNR":1.5},"apv_db":{"H":28,"M":25,"L":17,"SNR":27}},
+        {"variant":"HY80 gel","mean_db":{"H":30.4,"M":27.1,"L":20.8,"SNR":28.6},"sd_db":{"H":3.0,"M":2.0,"L":2.9,"SNR":1.9},"apv_db":{"H":27,"M":25,"L":18,"SNR":27}},
+        {"variant":"E-A-R Classic dual","mean_db":{"H":42.4,"M":41.8,"L":38.3,"SNR":42.9},"sd_db":{"H":3.7,"M":4.0,"L":6.5,"SNR":3.6},"apv_db":{"H":39,"M":38,"L":32,"SNR":39}}
+      ]
+    }
+  }
+}

@@ -22,7 +22,8 @@ if (-not $SkipBuild) {
 }
 
 $dist = Join-Path $repoRoot "dist"
-$stage = Join-Path $dist "stage"
+$stage = [IO.Path]::GetFullPath((Join-Path $dist "stage"))
+if ($stage -ne [IO.Path]::GetFullPath((Join-Path $repoRoot "dist\stage"))) { throw "Unexpected staging path" }
 $pluginDir = Join-Path $stage "BepInEx\plugins\GunsAreLoud"
 
 if (Test-Path -LiteralPath $stage) {
@@ -32,6 +33,19 @@ New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
 
 $assembly = Join-Path $repoRoot "client\GunsAreLoud.Client\bin\$Configuration\GunsAreLoud.Client.dll"
 Copy-Item -LiteralPath $assembly -Destination $pluginDir -Force
+
+foreach ($document in @("README.md", "MODEL.md", "CHANGELOG.md", "LICENSE")) {
+    Copy-Item -LiteralPath (Join-Path $repoRoot $document) -Destination $stage
+}
+
+# Keep reference links usable in the standalone archive.
+foreach ($document in @("README.md", "MODEL.md")) {
+    $documentPath = Join-Path $stage $document
+    $text = [IO.File]::ReadAllText($documentPath)
+    $text = $text.Replace("](docs/", "](https://github.com/Anamelash/spt-guns-are-loud/blob/v$version/docs/")
+    $text = $text.Replace("](build/", "](https://github.com/Anamelash/spt-guns-are-loud/blob/v$version/build/")
+    [IO.File]::WriteAllText($documentPath, $text)
+}
 
 $zip = Join-Path $dist "Guns-Are-Loud-$version.zip"
 if (Test-Path -LiteralPath $zip) {

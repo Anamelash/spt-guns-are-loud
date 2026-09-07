@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using GunsAreLoud.Client.Audio;
@@ -15,6 +15,7 @@ namespace GunsAreLoud.Tests
             for (int i = 0; i < HeadsetProfileRegistry.ProfileCount; i++)
             {
                 HeadsetProfile profile = HeadsetProfileRegistry.ProfileAt(i);
+                yield return new TestCaseData(i, 32000).SetName($"NativeFit_{profile.ProfileId}_32000");
                 yield return new TestCaseData(i, 44100).SetName($"NativeFit_{profile.ProfileId}_44100");
                 yield return new TestCaseData(i, 48000).SetName($"NativeFit_{profile.ProfileId}_48000");
             }

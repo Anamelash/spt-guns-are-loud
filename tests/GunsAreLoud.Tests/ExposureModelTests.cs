@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -271,7 +271,7 @@ namespace GunsAreLoud.Tests
                 .Count(field => field.FieldType.IsGenericType &&
                                 field.FieldType.GetGenericTypeDefinition() == typeof(ConfigEntry<>));
 
-            Assert.That(configEntryFields, Is.EqualTo(25));
+            Assert.That(configEntryFields, Is.EqualTo(34));
             Assert.That(_config.HeadphoneMode, Is.Not.Null);
             Assert.That(_config.GunshotContrastDb, Is.Not.Null);
             Assert.That(_config.IndoorHeadphonesDampingPercent, Is.Not.Null);
@@ -295,27 +295,37 @@ namespace GunsAreLoud.Tests
         {
             Assert.That(_config.Enabled.Value, Is.True);
             Assert.That(_config.Preset.Value, Is.EqualTo(LoudnessPreset.Balanced));
-            Assert.That(_config.ShotImpact.Value, Is.EqualTo(179.8122f).Within(0.0001f));
-            Assert.That(_config.GunshotContrastDb.Value, Is.EqualTo(6f));
+            Assert.That(_config.ShotImpact.Value, Is.EqualTo(160f).Within(0.0001f));
+            Assert.That(_config.GunshotContrastDb.Value, Is.EqualTo(8f));
             Assert.That(_config.IndoorEmphasis.Value, Is.EqualTo(100f));
-            Assert.That(_config.HearingTrauma.Value, Is.EqualTo(104.2253f).Within(0.0001f));
-            Assert.That(_config.Ringing.Value, Is.EqualTo(106.1033f).Within(0.0001f));
-            Assert.That(_config.EarDifference.Value, Is.EqualTo(140.3756f).Within(0.0001f));
+            Assert.That(_config.HearingTrauma.Value, Is.EqualTo(100f).Within(0.0001f));
+            Assert.That(_config.Ringing.Value, Is.EqualTo(100f).Within(0.0001f));
+            Assert.That(_config.EarDifference.Value, Is.EqualTo(140f).Within(0.0001f));
             Assert.That(_config.HeadphoneMode.Value, Is.EqualTo(HeadphoneMode.Realistic));
             Assert.That(_config.HeadphonesFit.Value, Is.EqualTo(HeadphonesFitPreset.Tight));
             Assert.That(_config.LowEndMode.Value, Is.EqualTo(GunshotLowEndMode.PitchedCopy));
             Assert.That(_config.AutomaticPitchedRoute.Value, Is.EqualTo(AutomaticPitchedRoute.CachedReport));
             Assert.That(_config.AutomaticTailMode.Value, Is.EqualTo(AutomaticTailMode.FullReportPerShot));
-            Assert.That(_config.PitchedLayerSemitones.Value, Is.EqualTo(12.01408f).Within(0.0001f));
+            Assert.That(_config.PitchedLayerSemitones.Value, Is.EqualTo(12f).Within(0.0001f));
             Assert.That(_config.LowEndNormalizationPercent.Value, Is.EqualTo(100f));
             Assert.That(_config.CaliberContrastPercent.Value, Is.EqualTo(200f));
             Assert.That(_config.PitchedLayerLowpassHz.Value, Is.EqualTo(2000f));
             Assert.That(_config.PitchedLayerHighpassHz.Value, Is.EqualTo(10.00001f).Within(0.0001f));
-            Assert.That(_config.PitchedLayerFadePercent.Value, Is.EqualTo(50.93896f).Within(0.0001f));
-            Assert.That(_config.AutomaticPitchedTailMs.Value, Is.EqualTo(400f));
-            Assert.That(_config.PitchedLayerGainDb.Value, Is.EqualTo(20.28169f).Within(0.0001f));
-            Assert.That(_config.PitchedLayerOcclusion.Value, Is.EqualTo(PitchedLayerOcclusionMode.Enhanced));
+            Assert.That(_config.PitchedLayerFadePercent.Value, Is.EqualTo(50f).Within(0.0001f));
+            Assert.That(_config.AutomaticPitchedTailMs.Value, Is.EqualTo(30f));
+            Assert.That(_config.PitchedLayerGainDb.Value, Is.EqualTo(20f).Within(0.0001f));
+            Assert.That(_config.PitchedLayerOcclusion.Value, Is.EqualTo(PitchedLayerOcclusionMode.Inherit));
             Assert.That(_config.PitchedLayerOccludedLowpassHz.Value, Is.EqualTo(500.4695f).Within(0.0001f));
+            Assert.That(_config.HearingLossDuration.Value, Is.EqualTo(100f));
+            Assert.That(_config.RingingDuration.Value, Is.EqualTo(100f));
+            Assert.That(_config.BlastHearingStrength.Value, Is.EqualTo(100f));
+            Assert.That(_config.BlastRingingStrength.Value, Is.EqualTo(100f));
+            Assert.That(_config.BlastHearingDuration.Value, Is.EqualTo(45f));
+            Assert.That(_config.BlastRingingDuration.Value, Is.EqualTo(90f));
+            Assert.That(_config.BlastSevereDuration.Value, Is.EqualTo(180f));
+            Assert.That(_config.BlastRadius.Value, Is.EqualTo(5f));
+            Assert.That(_config.BlastIndoorScale.Value, Is.EqualTo(3f));
+            Assert.That(_config.IndoorHeadphonesDampingPercent.Value, Is.EqualTo(100f));
             Assert.That(_config.DiagnosticShotLog.Value, Is.True);
         }
 
@@ -343,7 +353,7 @@ namespace GunsAreLoud.Tests
             foreach (ConfigEntryBase entry in advanced)
             {
                 Assert.That(entry.Description.Tags, Has.Some.Matches<object>(tag =>
-                    tag.GetType().GetProperty("IsAdvanced")?.GetValue(tag) is bool value && value),
+                    tag.GetType().GetField("IsAdvanced")?.GetValue(tag) is bool value && value),
                     $"{entry.Definition.Section} / {entry.Definition.Key} must be Advanced.");
             }
         }

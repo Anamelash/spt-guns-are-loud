@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace GunsAreLoud.Client.Runtime
 {
-    internal static class HeadsetProfileRegistry
+    internal static partial class HeadsetProfileRegistry
     {
         private static readonly Dictionary<string, HeadsetProfile> Profiles = Build();
         private static readonly HeadsetProfile[] UniqueProfiles = BuildUniqueProfiles();
@@ -21,7 +21,15 @@ namespace GunsAreLoud.Client.Runtime
             var result = new Dictionary<string, HeadsetProfile>(StringComparer.OrdinalIgnoreCase);
             Add(result, Sordin());
             Add(result, ComTacII());
-            Add(result, ProposedMuff("rac-proposed", "Ops-Core FAST RAC", new[] { "5a16b9fffcdbcb0176308b34" }));
+            // Explicit temporary AMP -> RAC fallback; not a claim of equivalent hardware.
+            // Shared profile also reuses the existing fit/cache and keeps approximation stars.
+            Add(result, ProposedMuff("rac-proposed", "Ops-Core FAST RAC", new[] {
+                "5a16b9fffcdbcb0176308b34",
+                "252d9d1d2552909d0a76033c", // Epic's AMP Black
+                "5b6e75274d865619855c447a", // Epic's AMP Tan
+                "7e6c09774462ad3ef5025f08", // Epic's AMP Tan Camo
+                "cd54f04eb7f0410772acbf35"  // Epic's AMP Black Camo
+            }));
             Add(result, ProposedMuff("gssh-proposed", "GSSh-01 family", new[] { "5b432b965acfc47a8774094e" }));
             Add(result, ProposedMuff("tactical-sport-proposed", "Peltor Tactical Sport", new[] { "5c165d832e2216398b5a7e36" }));
             Add(result, ProposedMuff("razor-proposed", "Walker's Razor Digital", new[] { "5e4d34ca86f774264f758330", "69d3c156cdeff2f448010e2e" }));
@@ -33,6 +41,7 @@ namespace GunsAreLoud.Client.Runtime
             Add(result, ProposedMuff("comtac-vi-proposed", "Peltor ComTac VI", new[] { "66b5f6985891c84aab75ca76", "66b5f6a28ca68c6461709ed8", "69c1632ca078dbb51e0e31b5", "69c264c00f660b3f0d058fcf", "69c26593ea474c30ad069f8f", "69c163b17c7040819b086502" }));
             Add(result, ProposedInsert("tep-300-proposed", "Peltor TEP-300", new[] { "68bf405779c8186398099017" }));
             Add(result, Cens());
+            ApplyReferenceProfiles(result);
             return result;
         }
 

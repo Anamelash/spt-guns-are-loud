@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using BepInEx.Configuration;
 using GunsAreLoud.Client.Audio;
@@ -9,6 +9,8 @@ namespace GunsAreLoud.Client.Runtime
 {
     internal sealed class HearingExposureController : MonoBehaviour
     {
+        private readonly BlastExposureState _blasts = new BlastExposureState();
+        private object _blastPlayer;
         private ModConfig _config;
         private HearingImpactProcessor _processor;
         private AudioListener _listener;
@@ -30,12 +32,11 @@ namespace GunsAreLoud.Client.Runtime
         private void OnSettingChanged(object sender, SettingChangedEventArgs args)
         {
             Interlocked.Exchange(ref _tuningDirty, 1);
-            if (!_config.Enabled.Value ||
-                (!ModConfig.IsResponseEnabled(ModConfig.NormalizeResponseControl(_config.HearingTrauma.Value)) &&
-                 !ModConfig.IsResponseEnabled(ModConfig.NormalizeResponseControl(_config.Ringing.Value))))
-            {
-                Interlocked.Exchange(ref _resetExposureDirty, 1);
-            }
+            if (!_config.Enabled.Value) Interlocked.Exchange(ref _resetExposureDirty, 1);
+            else if (!ModConfig.IsResponseEnabled(ModConfig.NormalizeResponseControl(_config.HearingTrauma.Value)) &&
+                !ModConfig.IsResponseEnabled(ModConfig.NormalizeResponseControl(_config.Ringing.Value)))
+                Interlocked.CompareExchange(ref _resetExposureDirty, 2, 0);
+
         }
 
         internal TuningSnapshot CurrentTuning()
@@ -108,6 +109,47 @@ namespace GunsAreLoud.Client.Runtime
             }
         }
 
+        internal void HandleExplosion(float distance, bool sourceIndoor, Vector3 position)
+        {
+            var audio = AudioRuntimeLookup.Audio;
+            var player = audio?.ListenerPlayer;
+            if (_config == null || !_config.Enabled.Value || player == null || !player.IsYourPlayer) return;
+            if (!ReferenceEquals(_blastPlayer, player)) { _blasts?.Reset(); _blastPlayer = player; }
+            EnsureListenerProcessor(force: true);
+            float protection = 0;
+            var item = HeadphonesResolver.FindEquippedItem(player.Equipment);
+            if (item != null)
+            {
+                if (HeadsetProfileRegistry.TryGet(item.TemplateId, out var profile))
+                {
+                    // Blast weighting is a low-band energy estimate, not NRR or the electronic limiter.
+                    float energy = 0; int count = 0;
+                    for (int i = 0; i < profile.Passive.BandCount; i++)
+                        if (profile.Passive.FrequencyAt(i) <= 500)
+                        { energy += Mathf.Pow(10, -profile.Passive.MeanAttenuationAt(i) / 10); count++; }
+                    if (count > 0) protection = -10 * Mathf.Log10(Mathf.Max(.000001f, energy / count));
+                }
+                else protection = 10; // Explicit conservative estimate for unregistered worn protection.
+            }
+            // An indoor source must not give an outdoor listener indoor propagation.
+            bool indoor = sourceIndoor && player.Environment == EnvironmentType.Indoor;
+            float severity = BlastExposureState.Severity(distance, indoor, _config.BlastRadius.Value,
+                _config.BlastIndoorScale.Value, protection);
+            float transmission = 1;
+            if (severity > .001f)
+            {
+                var head = player.PlayerBones?.Head?.Original;
+                Vector3 center = head != null ? head.position : (_listener != null ? _listener.transform.position : player.Position + Vector3.up * 1.6f);
+                transmission = BlastOcclusion.Transmission(position, center, player.Transform.Original);
+                severity *= transmission;
+            }
+            // Preserve the first 120 ms of the arriving bang, then ramp physiology over 100 ms.
+            _blasts.Add(Time.unscaledTime + Mathf.Max(0, distance) / 340f + .12f, severity,
+                _config.BlastHearingDuration.Value, _config.BlastRingingDuration.Value, _config.BlastSevereDuration.Value, .1f);
+            if (_config.DiagnosticShotLog.Value)
+                Plugin.Log.LogInfo($"blast exposure distance={distance:0.0}m sourceIndoor={sourceIndoor} listenerIndoor={player.Environment == EnvironmentType.Indoor} indoor={indoor} transmission={transmission:0.000} protection={protection:0.0}dB severity={severity:0.000} severe={severity >= .999f} severeSeconds={_config.BlastSevereDuration.Value:0}");
+        }
+
         internal void Shutdown()
         {
             if (_config != null) _config.Source.SettingChanged -= OnSettingChanged;
@@ -154,6 +196,9 @@ namespace GunsAreLoud.Client.Runtime
                 }
                 _wasEnabled = true;
 
+                var currentPlayer = AudioRuntimeLookup.Audio?.ListenerPlayer;
+                if (currentPlayer == null || !currentPlayer.IsYourPlayer || !ReferenceEquals(currentPlayer, _blastPlayer))
+                { _blasts?.Reset(); _blastPlayer = currentPlayer; }
                 TuningSnapshot tuning = CurrentTuning();
                 DecayDose(Time.unscaledDeltaTime, tuning);
                 ApplyProcessorTargets(tuning);
@@ -244,16 +289,21 @@ namespace GunsAreLoud.Client.Runtime
                 tuning,
                 AudioSettings.outputSampleRate);
 
+            var blast = _blasts.Sample(Time.unscaledTime);
+            float loss = Mathf.Clamp01(blast.Hearing * _config.BlastHearingStrength.Value / 100f);
+            float ring = Mathf.Min(.02f, blast.Ringing * .008f * _config.BlastRingingStrength.Value / 100f);
+            float attenuation = (blast.Severe ? 60f : 35f) * loss;
+            float cutoff = Mathf.Lerp(AudioSettings.outputSampleRate * .49f, 350f, loss);
             _processor.SetTargets(
-                response.ProcessingActive,
-                response.HearingLeft,
-                response.HearingRight,
-                response.AttenuationLeftDb,
-                response.AttenuationRightDb,
-                response.CutoffLeftHz,
-                response.CutoffRightHz,
-                response.TinnitusLeft,
-                response.TinnitusRight,
+                response.ProcessingActive || loss > .0001f || ring > .000001f,
+                loss > 0 ? 1f : response.HearingLeft,
+                loss > 0 ? 1f : response.HearingRight,
+                Mathf.Max(response.AttenuationLeftDb, attenuation),
+                Mathf.Max(response.AttenuationRightDb, attenuation),
+                Mathf.Min(response.CutoffLeftHz, cutoff),
+                Mathf.Min(response.CutoffRightHz, cutoff),
+                Mathf.Max(response.TinnitusLeft, ring),
+                Mathf.Max(response.TinnitusRight, ring),
                 tuning.TinnitusFrequencyHz,
                 tuning.TinnitusPitchSpreadHz,
                 AudioSettings.outputSampleRate);
@@ -262,15 +312,16 @@ namespace GunsAreLoud.Client.Runtime
         private void ResetEffect()
         {
             ExposureState.Reset();
+            _blasts?.Reset();
+            _blastPlayer = null;
             _processor?.ImmediateBypass();
         }
 
         private void ConsumePendingReset()
         {
-            if (Interlocked.Exchange(ref _resetExposureDirty, 0) != 0)
-            {
-                ResetEffect();
-            }
+            int reset = Interlocked.Exchange(ref _resetExposureDirty, 0);
+            if (reset == 1) ResetEffect();
+            else if (reset == 2) ExposureState.Reset();
         }
 
         private HearingExposureState ExposureState =>

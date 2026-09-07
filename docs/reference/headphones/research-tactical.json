@@ -1,0 +1,871 @@
+{
+  "schema": "tactical-headset-research-v2",
+  "date": "2026-09-07",
+  "policy": {
+    "numeric_fact_requires_source_url": true,
+    "nr_reminder": "NRR/SNR/HML are laboratory rating summaries, not frequency curves.",
+    "threshold_reminder": "criterion_level, limiter_level and signal_threshold are distinct fields; none is a universal hearing threshold.",
+    "secondary_quarantine": "Secondary claims are retained for review but must not feed automatic game calculations."
+  },
+  "sources": [
+    {
+      "id": "sordin_prox_2024_pdf",
+      "url": "https://cdn.shopify.com/s/files/1/0936/4842/1246/files/Sordin_Supreme_Pro-X_Aug2024.pdf?v=1761638864",
+      "publisher": "Sordin",
+      "edition": "Aug 2024",
+      "pages": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "authority": "manufacturer technical data sheet"
+    },
+    {
+      "id": "sordin_prox_product",
+      "url": "https://sordin.com/collections/active/products/sordin-supreme-pro-x",
+      "publisher": "Sordin",
+      "authority": "manufacturer product page"
+    },
+    {
+      "id": "rac_brochure",
+      "url": "https://shop.gentexcorp.com/content/Ops-Core-RAC-Headset-Brochure-English.pdf",
+      "publisher": "Gentex/Ops-Core",
+      "authority": "manufacturer brochure"
+    },
+    {
+      "id": "rac_manual",
+      "url": "https://shop.gentexcorp.com/content/Ops-Core_RAC_Headset_User_Manual.pdf",
+      "publisher": "Gentex/Ops-Core",
+      "edition": "OM101116-00",
+      "authority": "manufacturer operator manual"
+    },
+    {
+      "id": "amp_manual",
+      "url": "https://www.manualslib.com/manual/3584019/Ops-Core-Amp.html?page=16",
+      "publisher": "Gentex/Ops-Core",
+      "edition": "OM1002180-00 Rev 20240904; English specifications page 16A",
+      "pages": [
+        16
+      ],
+      "authority": "manufacturer operator manual mirrored for page extraction"
+    },
+    {
+      "id": "amp_datasheet",
+      "url": "https://shop.gentexcorp.com/content/AMP_Connectorized_Headset_Ops-Core_DataSheet.pdf",
+      "publisher": "Gentex/Ops-Core",
+      "authority": "manufacturer data sheet"
+    },
+    {
+      "id": "safariland_product",
+      "url": "https://safariland.com/products/liberator-hp-hearing-protection-lib_hp",
+      "publisher": "Safariland",
+      "authority": "manufacturer product page"
+    },
+    {
+      "id": "safariland_manual",
+      "url": "https://cdn.shopify.com/s/files/1/0086/8689/5184/files/060820A-ID_LIBERATOR_HP_USER_GUIDE_102820.pdf?v=1606861467",
+      "publisher": "Safariland",
+      "edition": "Part 1350405R.102820",
+      "pages": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "authority": "manufacturer user guide"
+    },
+    {
+      "id": "gssh_armytur",
+      "url": "https://armytur.ru/ratnik/garnitura-6m2",
+      "publisher": "retailer; claims AO Zavod Luch",
+      "authority": "secondary reproduction"
+    },
+    {
+      "id": "gssh_voensklad",
+      "url": "https://voensklad.su/ratnik/garnitura-gssh-01-6m2",
+      "publisher": "retailer",
+      "authority": "secondary reproduction"
+    }
+  ],
+  "families": [
+    {
+      "id": "sordin_supreme_prox",
+      "game_mapping": [
+        "MSA Sordin Supreme PRO-X/L (vintage unspecified)"
+      ],
+      "mapping_status": "quarantined: modern 2024 Pro-X sheet is family reference only; vintage game variant is not proven identical",
+      "variants": [
+        {
+          "id": "prox_headband_pvc",
+          "model": "Sordin Supreme Pro-X foldable headband",
+          "pads": "PVC foam sealing rings; polyether foam insert",
+          "mount": "headband",
+          "source": "sordin_prox_2024_pdf",
+          "standard": "EN 352-1:2020; EN 352-4:2020; EN 352-6:2020",
+          "attenuation": {
+            "frequencies_hz": [
+              63,
+              125,
+              250,
+              500,
+              1000,
+              2000,
+              4000,
+              8000
+            ],
+            "mean_db": [
+              17.8,
+              15.8,
+              19.3,
+              23.1,
+              30.6,
+              29.3,
+              36.7,
+              38.0
+            ],
+            "sd_db": [
+              3.2,
+              2.9,
+              3.2,
+              2.3,
+              3.4,
+              2.9,
+              3.3,
+              3.5
+            ],
+            "apv_db": [
+              14.6,
+              12.9,
+              16.1,
+              20.8,
+              27.2,
+              26.4,
+              33.4,
+              34.5
+            ],
+            "page": 3
+          },
+          "ansi_s319_foam": {
+            "frequencies_hz": [
+              125,
+              250,
+              500,
+              1000,
+              2000,
+              3150,
+              4000,
+              6300,
+              8000
+            ],
+            "mean_dbA": [
+              15.3,
+              19.3,
+              24.4,
+              29.1,
+              28.6,
+              31.1,
+              34.0,
+              36.1,
+              34.7
+            ],
+            "sd_dbA": [
+              3.0,
+              2.1,
+              2.8,
+              2.8,
+              2.4,
+              3.3,
+              3.2,
+              3.3,
+              2.9
+            ],
+            "page": 3
+          },
+          "ratings": {
+            "snr_db": 28,
+            "nrr_db": 21,
+            "h_db": 29,
+            "m_db": 25,
+            "l_db": 19,
+            "criterion_levels_dbA": {
+              "h": 112,
+              "m": 105,
+              "l": 94
+            },
+            "page": 3
+          },
+          "applicability": "headband PVC/foam; ANSI row explicitly labelled Foam sealing rings; do not apply to gel or Slim without variant evidence"
+        },
+        {
+          "id": "prox_headband_gel",
+          "model": "Sordin Supreme Pro-X foldable headband",
+          "pads": "gel sealing rings accessory",
+          "mount": "headband",
+          "source": "sordin_prox_2024_pdf",
+          "standard": "EN 352-1:2020",
+          "attenuation": {
+            "frequencies_hz": [
+              63,
+              125,
+              250,
+              500,
+              1000,
+              2000,
+              4000,
+              8000
+            ],
+            "mean_db": [
+              18.1,
+              15.7,
+              20.1,
+              25.4,
+              30.8,
+              30.1,
+              36.7,
+              36.2
+            ],
+            "sd_db": [
+              3.7,
+              3.8,
+              2.3,
+              2.9,
+              3.5,
+              3.2,
+              2.9,
+              4.0
+            ],
+            "apv_db": [
+              14.4,
+              11.9,
+              17.8,
+              22.4,
+              27.3,
+              26.9,
+              33.8,
+              32.2
+            ],
+            "page": 3
+          },
+          "ansi_s319_gel": {
+            "frequencies_hz": [
+              125,
+              250,
+              500,
+              1000,
+              2000,
+              3150,
+              4000,
+              6300,
+              8000
+            ],
+            "mean_dbA": [
+              16.8,
+              17.7,
+              23.5,
+              28.1,
+              28.0,
+              34.3,
+              39.1,
+              42.3,
+              39.7
+            ],
+            "sd_dbA": [
+              3.0,
+              1.9,
+              2.0,
+              2.6,
+              2.1,
+              2.7,
+              3.1,
+              2.6,
+              2.3
+            ],
+            "page": 3
+          },
+          "ratings": {
+            "snr_db": 27,
+            "nrr_db": 21,
+            "h_db": 29,
+            "m_db": 24,
+            "l_db": 19,
+            "page": 3
+          },
+          "applicability": "gel accessory; ANSI row explicitly labelled Gel sealing rings; separate fit from PVC"
+        },
+        {
+          "id": "prox_slim",
+          "model": "Sordin Supreme Pro-X Slim",
+          "pads": "not specified in accessible product text",
+          "mount": "headband/helmet variants exist",
+          "source": "sordin_prox_product",
+          "ratings": {
+            "snr_db": 27,
+            "nrr_db": 20,
+            "h_db": 28,
+            "m_db": 24,
+            "l_db": 20,
+            "weight_g_incl_batteries": 314
+          },
+          "applicability": "separate Slim geometry; no frequency table found; not interchangeable with standard Pro-X"
+        }
+      ],
+      "claims": [
+        {
+          "name": "sound_limit_compression_value",
+          "value": 82,
+          "unit": "dB(A)",
+          "source": "sordin_prox_2024_pdf",
+          "page": 2,
+          "evidence": "technical data sheet; sheet does not specify peak versus time-averaged semantics, so do not treat as measured impulse peak or microphone threshold"
+        },
+        {
+          "name": "mic_response",
+          "value": [
+            100,
+            10000
+          ],
+          "unit": "Hz",
+          "source": "sordin_prox_2024_pdf",
+          "page": 2
+        },
+        {
+          "name": "speaker_response",
+          "value": [
+            20,
+            20000
+          ],
+          "unit": "Hz",
+          "source": "sordin_prox_2024_pdf",
+          "page": 2
+        },
+        {
+          "name": "audio_input",
+          "value": "3.5 mm AUX; 399 mVrms; connected radio max 82 dB(A) through speakers",
+          "source": "sordin_prox_2024_pdf",
+          "page": 2
+        },
+        {
+          "name": "battery",
+          "value": "2 x 1.5 V AAA/LR03; approximately 400 h",
+          "source": "sordin_prox_2024_pdf",
+          "page": 2
+        },
+        {
+          "name": "mass",
+          "value": {
+            "pvc_g": 314,
+            "gel_g": 377
+          },
+          "unit": "g excluding batteries",
+          "source": "sordin_prox_2024_pdf",
+          "page": 2
+        },
+        {
+          "name": "operating_temperature",
+          "value": [
+            -20,
+            50
+          ],
+          "unit": "°C",
+          "source": "sordin_prox_2024_pdf",
+          "page": 2
+        },
+        {
+          "name": "water",
+          "value": "IP67-tested microphones and battery compartment",
+          "source": "sordin_prox_2024_pdf",
+          "page": 2
+        },
+        {
+          "name": "profiles",
+          "value": [
+            "Hunting",
+            "Shooting",
+            "Focus",
+            "Comms"
+          ],
+          "source": "sordin_prox_2024_pdf",
+          "page": 2
+        },
+        {
+          "name": "auto_off",
+          "value": 4,
+          "unit": "h without button press",
+          "source": "sordin_prox_2024_pdf",
+          "page": 2
+        }
+      ],
+      "unknowns": [
+        "vintage PRO-X/L identity and edition equivalence",
+        "profile-specific gain/output curves",
+        "attack/hold/release",
+        "latency",
+        "stereo separation/directional transfer",
+        "self-noise"
+      ]
+    },
+    {
+      "id": "ops_core_rac",
+      "game_mapping": [
+        "Ops-Core FAST RAC Headset"
+      ],
+      "mapping_status": "family match; game weight is not manufacturer specification",
+      "variants": [
+        {
+          "id": "rac_base",
+          "model": "RAC Base Version",
+          "pads": "foam pad/foam tip",
+          "mount": "FAST ARC rail helmet-mounted",
+          "source": "rac_brochure",
+          "ratings": {
+            "nrr_db": 20,
+            "snr_db": 23,
+            "h_db": 27,
+            "m_db": 20,
+            "l_db": 16
+          },
+          "applicability": "headset alone; no NFMI ear plugs"
+        },
+        {
+          "id": "rac_nfmi",
+          "model": "RAC NFMI Ear Plug Version",
+          "pads": "foam pad + NFMI ear plugs",
+          "mount": "FAST ARC rail helmet-mounted",
+          "source": "rac_brochure",
+          "ratings": {
+            "nrr_db": 32,
+            "snr_db": 39,
+            "h_db": 41,
+            "m_db": 36,
+            "l_db": 32
+          },
+          "applicability": "headset plus optional/included NFMI plugs; never substitute for base"
+        }
+      ],
+      "claims": [
+        {
+          "name": "battery",
+          "value": "2 AAA; 100 h; 2 h auto-off",
+          "source": "rac_brochure"
+        },
+        {
+          "name": "mass",
+          "value": {
+            "base_g": 500,
+            "nfmi_g": 545
+          },
+          "unit": "g",
+          "source": "rac_brochure"
+        },
+        {
+          "name": "environment",
+          "value": [
+            "MIL-STD-810G",
+            "MIL-STD-461F"
+          ],
+          "source": "rac_brochure"
+        },
+        {
+          "name": "features",
+          "value": [
+            "3D hear-through",
+            "360-degree situational audio",
+            "quick-release downlead",
+            "stowable rear earcups"
+          ],
+          "source": "rac_manual",
+          "pages": [
+            4,
+            5,
+            22,
+            23
+          ]
+        }
+      ],
+      "unknowns": [
+        "frequency Mf/sd/APV",
+        "criterion level",
+        "impulse limiter threshold",
+        "gain/output response",
+        "attack/hold/release",
+        "latency",
+        "stereo transfer",
+        "IP and temperature in primary brochure edition"
+      ]
+    },
+    {
+      "id": "ops_core_amp",
+      "game_mapping": [
+        "Ops-Core AMP Communication Headset Black/Tan/Black Camo/Tan Camo"
+      ],
+      "mapping_status": "game description says optional ARC rail adapter and no NFMI; map to headset-alone connectorized/rail configuration unless item metadata proves NFMI",
+      "variants": [
+        {
+          "id": "amp_headset_only",
+          "model": "AMP headset alone",
+          "pads": "ergonomic ear seals; exact material not specified",
+          "mount": "headband or optional ARC rail arms",
+          "source": "amp_manual",
+          "ratings": {
+            "nrr_db": 22,
+            "snr_db": 27,
+            "h_db": 31,
+            "m_db": 23,
+            "l_db": 19,
+            "page": 16
+          },
+          "attenuation": {
+            "frequencies_hz": [
+              125,
+              250,
+              500,
+              1000,
+              2000,
+              4000,
+              8000
+            ],
+            "headband": {
+              "mean_db": [
+                16.7,
+                18.7,
+                23.2,
+                25.4,
+                34.8,
+                43.8,
+                44.7
+              ],
+              "sd_db": [
+                2.8,
+                1.8,
+                2.6,
+                2.5,
+                3.0,
+                3.1,
+                2.8
+              ],
+              "assumed_protection_db": [
+                13.9,
+                16.9,
+                20.6,
+                22.9,
+                31.8,
+                40.7,
+                41.9
+              ]
+            },
+            "helmet": {
+              "mean_db": [
+                14.5,
+                15.5,
+                18.4,
+                22.4,
+                30.1,
+                45.6,
+                43.4
+              ],
+              "sd_db": [
+                4.4,
+                2.0,
+                3.9,
+                4.3,
+                5.6,
+                5.9,
+                7.2
+              ],
+              "assumed_protection_db": [
+                10.1,
+                13.5,
+                14.5,
+                18.1,
+                24.5,
+                39.7,
+                36.2
+              ]
+            },
+            "page": 16,
+            "standard": "EN 352 family table"
+          },
+          "applicability": "no NFMI earplugs; primary mapping for four game AMP color items"
+        },
+        {
+          "id": "amp_nfmi",
+          "model": "AMP NFMI-enabled + optional NFMI earplugs",
+          "pads": "NFMI earplug foam tips Slim/Standard/Large",
+          "mount": "headband or ARC rail arms",
+          "source": "amp_manual",
+          "ratings": {
+            "nrr_db": 34,
+            "snr_db": 41,
+            "h_db": 41,
+            "m_db": 39,
+            "l_db": 34,
+            "page": 16
+          },
+          "attenuation_ref": "same published headset cup table; NFMI combined rating is separate and no NFMI-only frequency array is published on page 16",
+          "applicability": "separate hardware/earplug mode; do not apply to game items by color alone"
+        }
+      ],
+      "claims": [
+        {
+          "name": "battery",
+          "value": {
+            "headset_only_h": 120,
+            "nfmi_engaged_h": 80,
+            "temperature_c": 21
+          },
+          "unit": "h",
+          "source": "amp_manual",
+          "page": 43
+        },
+        {
+          "name": "mass_g_including_batteries",
+          "value": {
+            "connectorized_headband": 386,
+            "connectorized_rail": 426,
+            "connectorized_nfmi_headband": 419,
+            "connectorized_nfmi_rail": 460,
+            "u174_headband": 414,
+            "u174_rail": 454,
+            "u174_nfmi_headband": 447,
+            "u174_nfmi_rail": 487,
+            "amphenol_headband": 422,
+            "amphenol_rail": 462,
+            "amphenol_nfmi_headband": 455,
+            "amphenol_nfmi_rail": 495
+          },
+          "source": "amp_manual",
+          "page": 44
+        },
+        {
+          "name": "environment",
+          "value": [
+            "IPX7 salt-water immersion",
+            "MIL-STD-810G",
+            "MIL-STD-461G",
+            "EN352"
+          ],
+          "source": "amp_manual",
+          "page": 43
+        },
+        {
+          "name": "temperature_c",
+          "value": {
+            "operating": [
+              -40,
+              55
+            ],
+            "storage": [
+              -40,
+              71
+            ]
+          },
+          "source": "amp_manual",
+          "page": 43
+        },
+        {
+          "name": "rail_mount",
+          "value": "ARC rail arms at rear rail; earcups rotate up/back for stowage",
+          "source": "amp_manual",
+          "pages": [
+            20,
+            24,
+            28
+          ]
+        },
+        {
+          "name": "audio",
+          "value": "3DHT ear-simulator directional ambient reproduction; boom mic movable left/right; communications remains active with hear-through on/off",
+          "source": "amp_manual",
+          "pages": [
+            5,
+            6,
+            13
+          ]
+        }
+      ],
+      "unknowns": [
+        "gain/output curve",
+        "attack/hold/release",
+        "latency",
+        "stereo transfer"
+      ]
+    },
+    {
+      "id": "safariland_liberator_hp20",
+      "game_mapping": [
+        "Safariland Liberator HP 2.0 variants"
+      ],
+      "mapping_status": "family match; exact game color does not change published acoustic claims",
+      "variants": [
+        {
+          "id": "hp20",
+          "model": "Liberator HP 2.0",
+          "pads": "ear seals + foam hygiene pad; annual/reissue replacement",
+          "mount": "over-head, behind-head, or two-Scorpion helmet rail mounts",
+          "source": "safariland_product",
+          "ratings": {
+            "nrr_db": 26
+          },
+          "applicability": "all three suspension options"
+        },
+        {
+          "id": "hp20_r",
+          "model": "Liberator HP-R rechargeable",
+          "pads": "same cup family; suspension variant-specific",
+          "mount": "same options where purchased",
+          "source": "safariland_product",
+          "ratings": {},
+          "applicability": "USB-C rechargeable; do not import HP battery runtime"
+        }
+      ],
+      "claims": [
+        {
+          "name": "modes",
+          "value": [
+            "Enhanced blocks impulse and passes speech/environment",
+            "Move ANC blocks external steady-state noise and adds 4-9 dB beyond cup",
+            "Clarity blocks external noise except speech"
+          ],
+          "source": "safariland_manual",
+          "pages": [
+            4,
+            5
+          ]
+        },
+        {
+          "name": "battery",
+          "value": "2 AAA or 1 CR123; 160-300 h mode-dependent",
+          "source": "safariland_product"
+        },
+        {
+          "name": "hp_r_battery",
+          "value": "USB-C rechargeable; up to 80 h",
+          "source": "safariland_product"
+        },
+        {
+          "name": "auto_off",
+          "value": 5,
+          "unit": "min no movement before warning/shutdown",
+          "source": "safariland_manual",
+          "page": 3
+        },
+        {
+          "name": "certification",
+          "value": "ANSI certified; CE not yet available on product page",
+          "source": "safariland_product"
+        }
+      ],
+      "unknowns": [
+        "frequency Mf/sd/APV",
+        "SNR/H/M/L",
+        "criterion and impulse thresholds",
+        "weight",
+        "gain/output response",
+        "attack/hold/release",
+        "latency",
+        "stereo/directional transfer",
+        "IP",
+        "temperature"
+      ]
+    },
+    {
+      "id": "gssh_01_6m2",
+      "game_mapping": [
+        "GSSh-01 6M2 active headset"
+      ],
+      "mapping_status": "secondary-only quarantine; no automatic calculation",
+      "variants": [
+        {
+          "id": "gssh_01_6m2_claimed",
+          "model": "GSSh-01 6M2 Ratnik",
+          "pads": "claimed leatherette pads",
+          "mount": "mesh adjustable headband; helmet-worn description",
+          "source": "gssh_armytur",
+          "authority": "secondary",
+          "applicability": "retailer-reproduced claims only"
+        }
+      ],
+      "claims": [
+        {
+          "name": "working_frequency",
+          "value": [
+            300,
+            7000
+          ],
+          "unit": "Hz; not narrower than",
+          "source": "gssh_armytur",
+          "authority": "secondary"
+        },
+        {
+          "name": "external_signal_limit",
+          "value": 115,
+          "unit": "dB",
+          "source": "gssh_armytur",
+          "authority": "secondary"
+        },
+        {
+          "name": "average_noise_reduction",
+          "value": 22,
+          "unit": "dB",
+          "source": "gssh_armytur",
+          "authority": "secondary"
+        },
+        {
+          "name": "current_max",
+          "value": 80,
+          "unit": "mA",
+          "source": "gssh_armytur",
+          "authority": "secondary"
+        },
+        {
+          "name": "runtime_min",
+          "value": 24,
+          "unit": "h; continuous",
+          "source": "gssh_armytur",
+          "authority": "secondary"
+        },
+        {
+          "name": "mass_max",
+          "value": 300,
+          "unit": "g",
+          "source": "gssh_armytur",
+          "authority": "secondary"
+        },
+        {
+          "name": "guaranteed_service_resource",
+          "value": 5000,
+          "unit": "h",
+          "source": "gssh_armytur",
+          "authority": "secondary"
+        },
+        {
+          "name": "battery",
+          "value": "2 AA",
+          "source": "gssh_armytur",
+          "authority": "secondary"
+        }
+      ],
+      "unknowns": [
+        "primary manufacturer datasheet/certificate",
+        "frequency Mf/sd/APV",
+        "NRR/SNR/HML",
+        "criterion definition",
+        "gain/output response",
+        "attack/hold/release",
+        "latency",
+        "stereo/directional transfer",
+        "AUX/radio input",
+        "IP",
+        "temperature",
+        "standards"
+      ]
+    }
+  ]
+}

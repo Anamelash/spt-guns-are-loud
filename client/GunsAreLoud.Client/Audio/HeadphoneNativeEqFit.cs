@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using GunsAreLoud.Client.Runtime;
 
 namespace GunsAreLoud.Client.Audio
@@ -24,6 +24,21 @@ namespace GunsAreLoud.Client.Audio
 
         internal static HeadphoneNativeEqFit Calculate(HeadsetPassiveProfile profile, int sampleRate)
         {
+            var best = CalculateFromWidth(profile, sampleRate, 0.7071067811865476);
+            // Different source curves can trap coordinate descent in a local minimum.
+            // Retry independent starting widths, preserving the same publication tolerance.
+            if (best.MaximumAnchorErrorDb > 1.5f)
+                foreach (double width in new[] { 0.35, 1.4 })
+                {
+                    var candidate = CalculateFromWidth(profile, sampleRate, width);
+                    if (candidate.MaximumAnchorErrorDb < best.MaximumAnchorErrorDb) best = candidate;
+                    if (best.MaximumAnchorErrorDb <= 1.5f) break;
+                }
+            return best;
+        }
+
+        private static HeadphoneNativeEqFit CalculateFromWidth(HeadsetPassiveProfile profile, int sampleRate, double initialWidth)
+        {
             if (profile == null || profile.BandCount == 0) throw new ArgumentException("Passive profile has no bands");
             int count = profile.BandCount;
             var frequencies = new float[count]; var controlsDb = new double[count];
@@ -32,7 +47,7 @@ namespace GunsAreLoud.Client.Audio
             double volume = target[0];
             for (int i = 1; i < count; i++) volume = Math.Min(volume, target[i]);
             var octaveRanges = new double[count];
-            for (int i = 0; i < count; i++) octaveRanges[i] = 0.7071067811865476;
+            for (int i = 0; i < count; i++) octaveRanges[i] = initialWidth;
             double step = 6;
             // First fully solve the stable fixed-width baseline. Flexible widths
             // are accepted only when they reduce the actual maximum anchor error.

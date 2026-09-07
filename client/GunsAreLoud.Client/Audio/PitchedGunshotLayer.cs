@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using GunsAreLoud.Client.Configuration;
 using GunsAreLoud.Client.Runtime;
 using UnityEngine;
@@ -449,7 +449,7 @@ namespace GunsAreLoud.Client.Audio
             if (Plugin.ModConfig?.DiagnosticShotLog.Value == true)
                 Plugin.Log.LogInfo($"low-end normalization voice={voice.DiagnosticId} clip={normalizationClipA?.name ?? normalizationClipB?.name} " +
                     $"amount={tuning.LowEndNormalizationPercent:0}% contrast={tuning.CaliberContrastPercent:0}% " +
-                    $"factorA={levelA.BodyGain:0.000} readyA={readyA} factorB={levelB.BodyGain:0.000} readyB={readyB} " +
+                    $"basis={(tuning.NormalizeBass ? "bass180" : "wide")} factorA={levelA.BodyGain:0.000} readyA={readyA} factorB={levelB.BodyGain:0.000} readyB={readyB} " +
                     $"decayGainA={levelA.DecayGain:0.000} decayReadyA={levelA.DecayReady} decayRmsA={levelA.DecayRms:0.00000} " +
                     $"decayTargetA={levelA.DecayTargetRms:0.00000} decayStartA={levelA.DecayStartSeconds * 1000:0}ms decayLimitedA={levelA.DecayLimited} " +
                     $"decayGainB={levelB.DecayGain:0.000} decayReadyB={levelB.DecayReady} decayRmsB={levelB.DecayRms:0.00000} " +

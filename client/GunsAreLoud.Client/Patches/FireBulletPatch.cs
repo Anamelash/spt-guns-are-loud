@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Runtime.CompilerServices;
 using GunsAreLoud.Client.Audio;
 using EFT.InventoryLogic;
@@ -90,7 +90,8 @@ namespace GunsAreLoud.Client.Patches
                 tuning.AutomaticTailMode,
                 tuning.LowEndNormalizationPercent,
                 tuning.CaliberContrastPercent,
-                headphonesDamping: default);
+                headphonesDamping: default,
+                normalizeBass: descriptor.WeaponCategory == WeaponCategory.Pistol && !__instance.IsAutoWeapon);
 
             __state = new ShotProcessingState
             {

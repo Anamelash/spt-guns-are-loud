@@ -1,0 +1,834 @@
+{
+  "date_checked": "2026-09-07",
+  "scope": "Consumer devices corresponding to installed SPT headset items; manufacturer claims are kept separate from game properties.",
+  "game_inventory": [
+    {
+      "templateId": "5e4d34ca86f774264f758330",
+      "name": "Walker's Razor Digital headset",
+      "description": "The Razor electronic ear muffs feature an ultra low-profile design and a rubberized coating for added durability and comfort, also providing optimal hearing protection. Manufactured by Walker's.",
+      "sourceFile": "SPT_Data\\database\\templates\\items.json",
+      "gameWeightKg": 0.43,
+      "prefab": "assets/content/items/equipment/headset_walkers_razor/item_equipment_headset_walkers_razor.bundle"
+    },
+    {
+      "templateId": "5f60cd6cf2bcbb675b00dac6",
+      "name": "Walker's XCEL 500BT Digital headset",
+      "description": "Active hearing protection with optimum electronic processing of ambient sounds without unnecessary distortion.",
+      "sourceFile": "SPT_Data\\database\\templates\\items.json",
+      "gameWeightKg": 0.49,
+      "prefab": "assets/content/items/equipment/headset_xcel/item_equipment_headset_xcel.bundle"
+    },
+    {
+      "templateId": "6033fa48ffd42c541047f728",
+      "name": "OPSMEN Earmor M32 headset",
+      "description": "The EARMOR M32 headset is an activated electronic communication hearing protector, ideal for tactical use. Manufactured by OPSMEN.",
+      "sourceFile": "SPT_Data\\database\\templates\\items.json",
+      "gameWeightKg": 0.49,
+      "prefab": "assets/content/items/equipment/headset_m32/item_equipment_headset_m32.bundle"
+    },
+    {
+      "templateId": "693bb59250fafa102607aeb7",
+      "name": "OPSMEN Earmor M32 headset (White)",
+      "description": "The EARMOR M32 headset is an activated electronic communication hearing protector, ideal for tactical use. Manufactured by OPSMEN. Version in white color.",
+      "sourceFile": "user\\mods\\WTT-ContentBackport\\db\\CustomItems\\Headphones_config_2.json",
+      "cloneTemplateId": "6033fa48ffd42c541047f728",
+      "gameWeightKg": 0.49,
+      "prefab": "assets/content/items/equipment/headset_m32/item_equipment_headset_m32_arena_ny2025.bundle",
+      "gameCompressorMs": {
+        "attack": 15,
+        "gain": 2,
+        "release": 265,
+        "threshold": -23
+      }
+    },
+    {
+      "templateId": "69413241b1ce1e5fbb09ed0a",
+      "name": "CENS ProFlex DX5 tactical earplug",
+      "description": "A high-end solution in tactical hearing protection. Custom-made to fit the wearer, so this matching size is a real stroke of luck.",
+      "sourceFile": "user\\mods\\WTT-ContentBackport\\db\\CustomItems\\Headphones_config_2.json",
+      "cloneTemplateId": "5645bcc04bdc2d363b8b4571",
+      "gameWeightKg": 0.012,
+      "prefab": "assets/content/items/equipment/headset_cens_proflex_dx5/item_equipment_headset_cens_proflex_dx5.bundle",
+      "gameCompressorMs": {
+        "attack": 15,
+        "gain": 2,
+        "release": 265,
+        "threshold": -23
+      }
+    },
+    {
+      "templateId": "69d3c156cdeff2f448010e2e",
+      "name": "Walker's Razor Digital headset (Molon Labe)",
+      "description": "The Razor electronic ear muffs feature an ultra low-profile design and a rubberized coating for added durability and comfort, also providing optimal hearing protection. Manufactured by Walker's. A version for the true gladiators.",
+      "sourceFile": "user\\mods\\WTT-ContentBackport\\db\\CustomItems\\update4\\Headphones_config.json",
+      "cloneTemplateId": "5645bcc04bdc2d363b8b4571",
+      "gameWeightKg": 0.43,
+      "prefab": "assets/content/items/equipment/item_equipment_headset_walkers_razor_molon_labe_bp03/item_equipment_headset_walkers_razor_molon_labe_bp03.bundle",
+      "gameCompressorMs": {
+        "attack": 20,
+        "gain": 2,
+        "release": 320,
+        "threshold": -23
+      }
+    }
+  ],
+  "variants": [
+    {
+      "id": "walkers_razor_digital_bt_gwp_drqbt",
+      "manufacturer": "Walker's",
+      "model": "Razor Digital BT; manual identifiers include GWP-DRQBT",
+      "gameMatches": [
+        "5e4d34ca86f774264f758330",
+        "69d3c156cdeff2f448010e2e"
+      ],
+      "evidence": "B",
+      "claims": [
+        {
+          "key": "bluetooth",
+          "value": true,
+          "unit": null,
+          "sourceUrl": "https://manuals.plus/m/4bb12ba42f53510d01bc4c0b1b9c17185b6b4a8e99315e6a0eb70f248dd87582",
+          "page": 1,
+          "evidence": "B"
+        },
+        {
+          "key": "microphones",
+          "value": 4,
+          "unit": "count",
+          "sourceUrl": "https://manuals.plus/m/4bb12ba42f53510d01bc4c0b1b9c17185b6b4a8e99315e6a0eb70f248dd87582",
+          "page": 1,
+          "evidence": "B"
+        },
+        {
+          "key": "battery",
+          "value": "2 x AAA",
+          "unit": null,
+          "sourceUrl": "https://manuals.plus/m/4bb12ba42f53510d01bc4c0b1b9c17185b6b4a8e99315e6a0eb70f248dd87582",
+          "page": 1,
+          "evidence": "B"
+        },
+        {
+          "key": "nrr",
+          "value": 21,
+          "unit": "dB",
+          "standard": "ANSI S3.19-1974",
+          "sourceUrl": "https://manuals.plus/m/4bb12ba42f53510d01bc4c0b1b9c17185b6b4a8e99315e6a0eb70f248dd87582",
+          "page": 1,
+          "evidence": "B"
+        }
+      ],
+      "attenuation": {
+        "standard": "ANSI S3.19-1974",
+        "frequenciesHz": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          3150,
+          4000,
+          6300,
+          8000
+        ],
+        "meanDb": [
+          17.1,
+          17.7,
+          23.4,
+          28.2,
+          32.2,
+          37.2,
+          37.9,
+          40.2,
+          38.5
+        ],
+        "sdDb": [
+          3.3,
+          2.3,
+          2.5,
+          1.4,
+          2.6,
+          3.9,
+          3.8,
+          3.8,
+          null
+        ],
+        "apvDb": null,
+        "sd8000Status": "not present in text extraction; original PDF image not independently verified"
+      },
+      "unknowns": [
+        "attack",
+        "release",
+        "latency",
+        "compression threshold",
+        "gain ceiling",
+        "weight from manufacturer",
+        "IP rating",
+        "operating temperature",
+        "APV",
+        "8000-Hz SD verification"
+      ]
+    },
+    {
+      "id": "walkers_razor_digital_xtrm_gwp_xdrse",
+      "manufacturer": "Walker's",
+      "model": "Razor X-TRM Digital GWP-XDRSE (wired/non-Bluetooth SKU)",
+      "gameMatches": [],
+      "evidence": "A",
+      "claims": [
+        {
+          "key": "nrr",
+          "value": 21,
+          "unit": "dB",
+          "sourceUrl": "https://www.walkersgameear.com/razor-x-trm-digital-muffs/",
+          "page": null,
+          "evidence": "A"
+        },
+        {
+          "key": "soundActivatedCompression",
+          "value": 0.02,
+          "unit": "s",
+          "sourceUrl": "https://www.walkersgameear.com/razor-x-trm-digital-muffs/",
+          "page": null,
+          "evidence": "A"
+        },
+        {
+          "key": "microphones",
+          "value": 2,
+          "unit": "hi-gain omnidirectional",
+          "sourceUrl": "https://www.walkersgameear.com/razor-x-trm-digital-muffs/",
+          "page": null,
+          "evidence": "A"
+        },
+        {
+          "key": "battery",
+          "value": "2 x AAA",
+          "unit": null,
+          "sourceUrl": "https://www.walkersgameear.com/razor-x-trm-digital-muffs/",
+          "page": null,
+          "evidence": "A"
+        }
+      ],
+      "attenuation": null,
+      "unknowns": [
+        "Bluetooth (this SKU page does not state it)",
+        "band mean/SD/APV",
+        "attack/release",
+        "latency",
+        "gain ceiling",
+        "weight",
+        "IP rating",
+        "temperature"
+      ]
+    },
+    {
+      "id": "walkers_razor_digital_xtrm_bluetooth_gwp_xdrsem_bt_gy",
+      "manufacturer": "Walker's",
+      "model": "Razor Digital X-TRM Bluetooth GWP-XDRSEM-BT-GY",
+      "gameMatches": [],
+      "evidence": "A",
+      "claims": [
+        {
+          "key": "nrr",
+          "value": 21,
+          "unit": "dB",
+          "sourceUrl": "https://www.walkersgameear.com/razor-digital-bluetooth-xtrm/",
+          "page": null,
+          "evidence": "A"
+        },
+        {
+          "key": "soundActivatedCompression",
+          "value": 0.02,
+          "unit": "s",
+          "sourceUrl": "https://www.walkersgameear.com/razor-digital-bluetooth-xtrm/",
+          "page": null,
+          "evidence": "A"
+        },
+        {
+          "key": "microphones",
+          "value": 2,
+          "unit": "hi-gain omnidirectional",
+          "sourceUrl": "https://www.walkersgameear.com/razor-digital-bluetooth-xtrm/",
+          "page": null,
+          "evidence": "A"
+        },
+        {
+          "key": "battery",
+          "value": "2 x AAA",
+          "unit": null,
+          "sourceUrl": "https://www.walkersgameear.com/razor-digital-bluetooth-xtrm/",
+          "page": null,
+          "evidence": "A"
+        },
+        {
+          "key": "bluetooth",
+          "value": true,
+          "unit": null,
+          "sourceUrl": "https://www.walkersgameear.com/razor-digital-bluetooth-xtrm/",
+          "page": null,
+          "evidence": "A"
+        },
+        {
+          "key": "autoOff",
+          "value": 4,
+          "unit": "h",
+          "sourceUrl": "https://www.walkersgameear.com/razor-digital-bluetooth-xtrm/",
+          "page": null,
+          "evidence": "A"
+        }
+      ],
+      "attenuation": null,
+      "unknowns": [
+        "band mean/SD/APV",
+        "attack/release",
+        "latency",
+        "gain ceiling",
+        "weight",
+        "IP rating",
+        "temperature"
+      ]
+    },
+    {
+      "id": "walkers_xcel_500bt_gwp_xsem_bt",
+      "manufacturer": "Walker's",
+      "model": "XCEL 500BT Digital GWP-XSEM-BT",
+      "gameMatches": [
+        "5f60cd6cf2bcbb675b00dac6"
+      ],
+      "evidence": "B",
+      "claims": [
+        {
+          "key": "nrr",
+          "value": 26,
+          "unit": "dB",
+          "sourceUrl": "https://manuals.plus/m/f6717b14daeef6c64155d2a35f6b60c19b72da90290a7995a50a4450e485ffdd",
+          "page": 4,
+          "evidence": "B"
+        },
+        {
+          "key": "modes",
+          "value": [
+            "Universal",
+            "Speech Clarity",
+            "High Frequency",
+            "Power Boost"
+          ],
+          "unit": null,
+          "sourceUrl": "https://manuals.plus/m/f6717b14daeef6c64155d2a35f6b60c19b72da90290a7995a50a4450e485ffdd",
+          "page": 1,
+          "evidence": "B"
+        },
+        {
+          "key": "variableDynamicSoundSuppression",
+          "value": true,
+          "unit": null,
+          "sourceUrl": "https://manuals.plus/m/f6717b14daeef6c64155d2a35f6b60c19b72da90290a7995a50a4450e485ffdd",
+          "page": 4,
+          "evidence": "B"
+        },
+        {
+          "key": "autoOff",
+          "value": "2/4/6",
+          "unit": "h",
+          "sourceUrl": "https://manuals.plus/m/f6717b14daeef6c64155d2a35f6b60c19b72da90290a7995a50a4450e485ffdd",
+          "page": 1,
+          "evidence": "B"
+        },
+        {
+          "key": "battery",
+          "value": "2 x AAA",
+          "unit": null,
+          "sourceUrl": "https://manuals.plus/m/f6717b14daeef6c64155d2a35f6b60c19b72da90290a7995a50a4450e485ffdd",
+          "page": 1,
+          "evidence": "B"
+        }
+      ],
+      "attenuation": null,
+      "unknowns": [
+        "band mean/SD/APV",
+        "attack/release",
+        "latency",
+        "compression threshold",
+        "gain ceiling",
+        "manufacturer weight",
+        "IP rating",
+        "temperature"
+      ]
+    },
+    {
+      "id": "earmor_m32_plus",
+      "manufacturer": "EARMOR / OPSMEN",
+      "model": "M32 Plus",
+      "gameMatches": [
+        "6033fa48ffd42c541047f728",
+        "693bb59250fafa102607aeb7"
+      ],
+      "evidence": "A",
+      "claims": [
+        {
+          "key": "nrr",
+          "value": 22,
+          "unit": "dB",
+          "standard": "ANSI S3.19-1974",
+          "sourceUrl": "https://www.earmor.com/wp-content/uploads/2024/01/M32-Plus_EN_Usermanual_WebV1.pdf",
+          "page": 2,
+          "evidence": "A"
+        },
+        {
+          "key": "snr",
+          "value": 29,
+          "unit": "dB",
+          "standard": "EN352-1:2020",
+          "sourceUrl": "https://www.earmor.com/wp-content/uploads/2024/01/M32-Plus_EN_Usermanual_WebV1.pdf",
+          "page": 2,
+          "evidence": "A"
+        },
+        {
+          "key": "activationNoiseReductionLevel",
+          "value": 82,
+          "unit": "dB",
+          "sourceUrl": "https://www.earmor.com/wp-content/uploads/2024/01/M32-Plus_EN_Usermanual_WebV1.pdf",
+          "page": 5,
+          "evidence": "A"
+        },
+        {
+          "key": "speakerResponse",
+          "value": "20-20000",
+          "unit": "Hz",
+          "sourceUrl": "https://www.earmor.com/wp-content/uploads/2024/01/M32-Plus_EN_Usermanual_WebV1.pdf",
+          "page": 5,
+          "evidence": "A",
+          "note": "speaker frequency response, not total electronic transfer function"
+        },
+        {
+          "key": "batteryLife",
+          "value": 60,
+          "unit": "h",
+          "sourceUrl": "https://www.earmor.com/wp-content/uploads/2024/01/M32-Plus_EN_Usermanual_WebV1.pdf",
+          "page": 5,
+          "evidence": "A"
+        },
+        {
+          "key": "weight",
+          "value": "295+/-10",
+          "unit": "g",
+          "sourceUrl": "https://www.earmor.com/wp-content/uploads/2024/01/M32-Plus_EN_Usermanual_WebV1.pdf",
+          "page": 5,
+          "evidence": "A"
+        },
+        {
+          "key": "operatingTemperature",
+          "value": "-20..60",
+          "unit": "C",
+          "sourceUrl": "https://www.earmor.com/wp-content/uploads/2024/01/M32-Plus_EN_Usermanual_WebV1.pdf",
+          "page": 5,
+          "evidence": "A"
+        },
+        {
+          "key": "speaker",
+          "value": "30 mm dynamic coil, 32 ohm, approx 30 mW",
+          "unit": null,
+          "sourceUrl": "https://www.earmor.com/wp-content/uploads/2024/01/M32-Plus_EN_Usermanual_WebV1.pdf",
+          "page": 5,
+          "evidence": "A"
+        },
+        {
+          "key": "volumeLevels",
+          "value": 5,
+          "unit": "levels",
+          "sourceUrl": "https://www.earmor.com/wp-content/uploads/2024/01/M32-Plus_EN_Usermanual_WebV1.pdf",
+          "page": 4,
+          "evidence": "A"
+        },
+        {
+          "key": "autoOff",
+          "value": 4,
+          "unit": "h",
+          "sourceUrl": "https://www.earmor.com/wp-content/uploads/2024/01/M32-Plus_EN_Usermanual_WebV1.pdf",
+          "page": 4,
+          "evidence": "A"
+        },
+        {
+          "key": "audioInputLimit",
+          "value": 82,
+          "unit": "dB",
+          "sourceUrl": "https://www.earmor.com/wp-content/uploads/2024/01/M32-Plus_EN_Usermanual_WebV1.pdf",
+          "page": 5,
+          "evidence": "A"
+        },
+        {
+          "key": "low_battery_warning",
+          "value": 2.55,
+          "unit": "V",
+          "sourceUrl": "https://www.earmor.com/wp-content/uploads/2024/01/M32-Plus_EN_Usermanual_WebV1.pdf",
+          "page": 5,
+          "evidence": "A"
+        },
+        {
+          "key": "low_battery_shutdown_below",
+          "value": 2.45,
+          "unit": "V",
+          "sourceUrl": "https://www.earmor.com/wp-content/uploads/2024/01/M32-Plus_EN_Usermanual_WebV1.pdf",
+          "page": 5,
+          "evidence": "A"
+        },
+        {
+          "key": "materials",
+          "value": "ABS+POM+Metal",
+          "unit": null,
+          "sourceUrl": "https://www.earmor.com/wp-content/uploads/2024/01/M32-Plus_EN_Usermanual_WebV1.pdf",
+          "page": 6,
+          "evidence": "A"
+        },
+        {
+          "key": "connector",
+          "value": "U174/u; 7.0 mm audio plug; NATO-compatible communication models",
+          "unit": null,
+          "sourceUrl": "https://www.earmor.com/wp-content/uploads/2024/01/M32-Plus_EN_Usermanual_WebV1.pdf",
+          "page": 6,
+          "evidence": "A"
+        }
+      ],
+      "attenuation": {
+        "ansi": {
+          "standard": "ANSI S3.19-1974",
+          "frequenciesHz": [
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            3150,
+            4000,
+            6300,
+            8000
+          ],
+          "meanDb": [
+            17.7,
+            19.1,
+            24.7,
+            29.6,
+            30.1,
+            37.6,
+            40.0,
+            41.7,
+            40.5
+          ],
+          "sdDb": [
+            3.1,
+            1.9,
+            2.3,
+            2.3,
+            2.2,
+            3.2,
+            3.4,
+            2.7,
+            3.1
+          ],
+          "apvDb": null
+        },
+        "en352": {
+          "standard": "EN352-1:2020",
+          "frequenciesHz": [
+            63,
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "meanDb": [
+            20.5,
+            16.4,
+            21.5,
+            25.4,
+            29.7,
+            30.2,
+            41.6,
+            41.3
+          ],
+          "sdDb": [
+            3.6,
+            2.8,
+            2.6,
+            1.9,
+            2.2,
+            2.5,
+            3.0,
+            3.0
+          ],
+          "apvDb": [
+            16.9,
+            13.6,
+            18.9,
+            23.5,
+            27.5,
+            27.7,
+            38.6,
+            37.9
+          ]
+        }
+      },
+      "unknowns": [
+        "IP rating",
+        "attack/release",
+        "latency",
+        "compression threshold",
+        "gain ceiling",
+        "total electronic response",
+        "manufacturer statement resolving 60 h vs descriptive up-to-200 h"
+      ],
+      "sourceConflicts": [
+        "EN table at 8000Hz prints mean41.3 sd3.0 and mean-SD37.9; arithmetic gives38.3. Preserve rawsource butreviewAPVpoint beforecalculation.",
+        "Storage guidance onPDFpage3 saysnotabove55C whilepage6 specifications list-40to70C; retainbothconditions asunresolved conflict.",
+        "Runtime200h prose versus60h specifications; operatingconditionsnotresolved."
+      ]
+    },
+    {
+      "id": "earmor_m32_mark4_webpage_only",
+      "manufacturer": "EARMOR",
+      "model": "M32 Mark4",
+      "gameMatches": [],
+      "evidence": "C",
+      "status": "quarantined",
+      "claims": [
+        {
+          "key": "webpageClaims",
+          "value": "NRR22, SNR28, Bluetooth5.2, 10m, 2xAAA, up-to-60h, 40mm speaker, 3.5mm AUX, auto-off4h, -20..60C, storage -30..70C, approx320g, CE/RoHS/FCC, suppresses above80dB",
+          "unit": null,
+          "sourceUrl": "https://www.earmor.com/product/m32-mark4/",
+          "page": null,
+          "evidence": "C",
+          "note": "unfinished CMS page with placeholder FAQ and $9999 price; do not use for calculations"
+        }
+      ],
+      "attenuation": null,
+      "unknowns": [
+        "all Mark4 values require a valid manual or certification report"
+      ]
+    },
+    {
+      "id": "earmor_m32_mod3",
+      "manufacturer": "EARMOR",
+      "model": "M32 MOD3",
+      "gameMatches": [],
+      "evidence": "B",
+      "claims": [
+        {
+          "key": "nrr",
+          "value": 22,
+          "unit": "dB",
+          "sourceUrl": "https://www.earmor.eu/en/m32/",
+          "page": null,
+          "evidence": "B"
+        },
+        {
+          "key": "ip",
+          "value": "IPX-5",
+          "unit": null,
+          "sourceUrl": "https://www.earmor.eu/en/m32/",
+          "page": null,
+          "evidence": "B"
+        },
+        {
+          "key": "battery",
+          "value": "2 x AAA",
+          "unit": null,
+          "sourceUrl": "https://www.earmor.eu/en/m32/",
+          "page": null,
+          "evidence": "B"
+        }
+      ],
+      "attenuation": null,
+      "unknowns": [
+        "band mean/SD/APV",
+        "SNR",
+        "timing",
+        "weight",
+        "temperature"
+      ]
+    },
+    {
+      "id": "cens_proflex_dx5",
+      "manufacturer": "CENS / Puretone",
+      "model": "ProFlex DX5",
+      "gameMatches": [
+        "69413241b1ce1e5fbb09ed0a"
+      ],
+      "evidence": "A",
+      "claims": [
+        {
+          "key": "snr",
+          "value": 25,
+          "unit": "dB",
+          "standard": "EN352",
+          "sourceUrl": "https://www.censdigital.com/wp-content/uploads/2019/07/ProFlex-DX-Series-Download-Brochure.pdf",
+          "page": 16,
+          "evidence": "A"
+        },
+        {
+          "key": "modes",
+          "value": [
+            "Game",
+            "Clay",
+            "Range",
+            "Wireless Comms",
+            "Hunter",
+            "Mute"
+          ],
+          "unit": null,
+          "sourceUrl": "https://www.censdigital.com/wp-content/uploads/2019/07/ProFlex-DX-Series-Download-Brochure.pdf",
+          "page": 15,
+          "evidence": "A"
+        },
+        {
+          "key": "volumeSteps",
+          "value": 10,
+          "unit": "digital steps",
+          "sourceUrl": "https://www.censdigital.com/",
+          "page": null,
+          "evidence": "A"
+        },
+        {
+          "key": "dspChannels",
+          "value": 16,
+          "unit": "digital audio DSP channels",
+          "sourceUrl": "https://www.censdigital.com/",
+          "page": null,
+          "evidence": "A"
+        },
+        {
+          "key": "battery",
+          "value": "size 13 zinc-air",
+          "unit": null,
+          "sourceUrl": "https://www.censdigital.com/wp-content/uploads/2019/07/CENSProFlexGuide-UG510-EN-3.00.pdf",
+          "page": 7,
+          "evidence": "A"
+        },
+        {
+          "key": "batteryLife",
+          "value": 400,
+          "unit": "h maximum typical continuous use for CENS ProFlex family; DX5-specific runtime not separately stated",
+          "sourceUrl": "https://www.censdigital.com/wp-content/uploads/2019/07/CENSProFlexGuide-UG510-EN-3.00.pdf",
+          "page": 5,
+          "evidence": "A"
+        },
+        {
+          "key": "startup",
+          "value": "instant start",
+          "unit": null,
+          "sourceUrl": "https://www.censdigital.com/wp-content/uploads/2019/07/CENSProFlexGuide-UG510-EN-3.00.pdf",
+          "page": 13,
+          "evidence": "A"
+        },
+        {
+          "key": "certification",
+          "value": "EN352-2:2002, EN352-7:2002; PPE Module D; IPIL ANSI S12.42-2010",
+          "unit": null,
+          "sourceUrl": "https://www.censdigital.com/wp-content/uploads/2019/07/ProFlex-DX-Series-Download-Brochure.pdf",
+          "page": 14,
+          "evidence": "A"
+        }
+      ],
+      "attenuation": {
+        "electronicModule": {
+          "standard": "EN352",
+          "frequenciesHz": [
+            63,
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "meanDb": [
+            26.1,
+            24.6,
+            23.2,
+            23.3,
+            23.4,
+            31.6,
+            31.8,
+            36.4
+          ],
+          "sdDb": [
+            6.4,
+            4.6,
+            3.8,
+            3.5,
+            3.4,
+            3.6,
+            3.3,
+            4.8
+          ],
+          "apvDb": [
+            19.7,
+            20.0,
+            19.4,
+            19.8,
+            20.0,
+            28.0,
+            28.5,
+            31.6
+          ]
+        },
+        "passiveModule": {
+          "standard": "EN352",
+          "frequenciesHz": [
+            63,
+            125,
+            250,
+            500,
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "meanDb": [
+            24.2,
+            23.5,
+            22.3,
+            22.8,
+            23.5,
+            32.1,
+            30.4,
+            36.8
+          ],
+          "sdDb": [
+            4.5,
+            3.6,
+            2.8,
+            3.8,
+            3.4,
+            3.8,
+            3.8,
+            5.6
+          ],
+          "apvDb": [
+            19.7,
+            19.9,
+            19.5,
+            19.0,
+            20.1,
+            28.3,
+            26.6,
+            31.2
+          ]
+        }
+      },
+      "unknowns": [
+        "DX5-specific runtime",
+        "attack/release",
+        "threshold",
+        "gain ceiling",
+        "end-to-end latency",
+        "IP rating",
+        "weight",
+        "operating/storage temperature"
+      ]
+    }
+  ]
+}

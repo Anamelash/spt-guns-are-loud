@@ -8,12 +8,12 @@ The model is physically motivated but not an absolute simulation. EFT's normaliz
 
 ## Scope and invariants
 
-The shot model runs only when `WeaponSoundPlayer.FireBullet` belongs to the local player in first person. It snapshots cartridge, projectile mass, muzzle velocity, weapon class, muzzle-device loudness, suppressor state, indoor/outdoor state, shoulder stance, and equipped headset before any audio-thread work.
+Grenade events also feed a separate local hearing-exposure model and the world-audio headset path. The shot model runs only when `WeaponSoundPlayer.FireBullet` belongs to the local player in first person. It snapshots cartridge, projectile mass, muzzle velocity, weapon class, muzzle-device loudness, suppressor state, indoor/outdoor state, shoulder stance, and equipped headset before any audio-thread work.
 
-The following are deliberate invariants:
+The following constraints apply:
 
 - no projectile, recoil, animation, ammunition, damage, health, or AI-hearing behavior is changed;
-- observed-player gunshots and bullet fly-by behavior are not changed;
+- observed-player gunshot sources and bullet fly-by sources are not modified; their playback is subject to the local headset and hearing response;
 - EFT's original gunshot clips are never rewritten;
 - a missed or cold derived layer is never replayed late;
 - unknown audio routes and unsupported headsets fail open to stock behavior;
@@ -63,7 +63,7 @@ If the cache is not ready, the shot remains timely and uses `OriginalBand`; miss
 
 ## Low-end level model
 
-The purpose of normalization is to prevent arbitrary mastering differences between weapon recordings from overpowering the intended cartridge ordering. It is level matching, not compression, limiting, or physical SPL calibration.
+Normalization matches recording levels before cartridge weighting. It uses digital RMS measurements rather than compression, limiting, or physical SPL calibration.
 
 The analysis uses the same pitch and band-pass implementation as playback. It measures stereo energy independently, so opposite channel polarity cannot cancel the estimate. Leading silence is skipped with 2 ms of retained pre-roll.
 
@@ -88,15 +88,17 @@ requested_dB = clamp(20 log10(t / m), -12 dB, +12 dB)
 gain         = 10^(requested_dB * clamp(q, 0, 150) / 100 / 20)
 ```
 
-At 100%, the correction is limited to ±12 dB. Values above 100% intentionally exaggerate that bounded request, reaching at most ±18 dB at 150%. Signals below the minimum measurable RMS are never boosted.
+For nonautomatic pistol copies, normalization measures the band below 180 Hz and applies a scalar gain to the existing copy, without adding a playback crossover. The lower correction bound is -24 dB for this route; the upper bound is +12 dB. Other routes use the ±12 dB bounds above.
+
+At 100%, the ordinary correction is limited to ±12 dB. Values above 100% scale that bounded request, reaching at most ±18 dB at 150%. Signals below the minimum measurable RMS are never boosted.
 
 The decay is conservative. A quiet decay may recover by at most 6 dB relative to an attenuated body and never above its native level. A strong decay keeps the body correction. If the body already requires gain above unity, the decay receives no additional recovery. Playback holds the body coefficient through the first 180 ms or the actual automatic body boundary, whichever is later, then moves to the decay coefficient over 30 ms.
 
-Normalization intentionally excludes user copy gain, fade, suppressor attenuation, headset processing, and occlusion. This prevents the analyser from undoing those choices.
+Normalization excludes user copy gain, fade, suppressor attenuation, headset processing, and occlusion.
 
 ## Cartridge ordering and direct impact
 
-The exposure model groups cartridges into readable families rather than pretending that bullet diameter alone predicts muzzle blast:
+The exposure model assigns baseline severity by cartridge family:
 
 | Family | Baseline severity |
 | --- | ---: |
@@ -135,7 +137,7 @@ severity = max(0, caliberBaseline + energyCorrection)
          * presetExposureScale
 ```
 
-The tuned `Balanced` profile uses an indoor multiplier of 1.35 and an exposure scale of 0.78. The accumulator is capped at 4.0.
+The `Balanced` profile uses an indoor multiplier of 1.35 and an exposure scale of 0.78. The accumulator is capped at 4.0.
 
 ### Left and right ears
 
@@ -146,7 +148,7 @@ dose_exposed  = severity * (1 + asymmetry)
 dose_shielded = severity * (1 - asymmetry)
 ```
 
-The current long-gun asymmetry is bounded at 0.25 even if the F12 scale is increased.
+Long-gun asymmetry is bounded at 0.25 even if the F12 scale is increased.
 
 ### Accumulation and recovery
 
@@ -158,19 +160,19 @@ tau = fastRecovery + (slowRecovery - fastRecovery) * n
 dose(t + dt) = dose(t) * exp(-dt / tau)
 ```
 
-This makes isolated shots recover quickly while sustained fire lingers. The durations are deliberately compressed for gameplay and are not physiological recovery times.
+This makes isolated shots recover quickly while sustained fire lingers. The durations are gameplay time scales, not physiological recovery times.
 
 ### Temporary hearing loss and tinnitus
 
-Temporary hearing loss maps normalized dose through a response curve, then applies independent left/right attenuation and low-pass cutoff. Tinnitus uses a separate threshold, strength, and duration mapping. The two F12 controls do not feed each other's response, although both begin from the same shot-derived dose.
+Temporary hearing loss maps normalized dose through a response curve, then applies independent left/right attenuation and low-pass cutoff. Tinnitus uses a separate threshold, strength, and duration mapping. F12 provides independent intensity and duration controls for hearing loss and ringing. Both begin from shot-derived exposure, but changing one effect does not change the other effect's intensity or recovery scale.
 
 At 0%, either effect is fully bypassed. Disabling both effects or disabling the mod clears accumulated state rather than preserving a hidden dose for later.
 
 ## Indoor response
 
-Indoor state comes from EFT's binary environment flag. It increases exposure and tunes EFT's existing Meta XR early-reflection and reverb-only sources. The mod does not estimate room geometry, materials, or RT60, and it does not replace the room with generated noise or a synthetic reverberator.
+Indoor state comes from EFT's binary environment flag. It increases exposure and tunes EFT's existing Meta XR early-reflection and reverb-only sources. The room-return model does not estimate room geometry, materials, or RT60, and it does not replace the room with generated noise or a synthetic reverberator.
 
-This is why `Indoor Emphasis` controls both audible room contribution and additional hearing dose: both are consequences of reflected energy, but the implementation remains bounded by the acoustic information EFT exposes.
+`Indoor Emphasis` scales both the audible room contribution and the additional indoor hearing dose.
 
 ## Gunshot contrast
 
@@ -196,30 +198,53 @@ p_ear(t)  = p_pass(t) + p_elec(t)
 
 The passive path is always present and frequency dependent. The electronic path represents external microphones, band limitation, level-dependent gain, and the internal speakers. Loud sound reduces the shared stereo-linked electronic gain; attack, hold, and recovery continue across every source and every bullet instead of resetting per shot.
 
-The prototype electronics use +6 dB quiet gain, a -24 dBFS threshold, 6 dB knee, 10:1 ratio, 0.5 ms attack, 10 ms hold, 150 ms release, a 0.5 linear output ceiling, and a 100-10,000 Hz microphone band. These are engineering defaults, not measured specifications of every represented headset. In particular, dBFS is not dB SPL.
+The electronic model uses +6 dB quiet gain, a -24 dBFS threshold, 6 dB knee, 10:1 ratio, 0.5 ms attack, 10 ms hold, 150 ms release, a 0.5 linear output ceiling, and a 100-10,000 Hz microphone band. These are engineering defaults, not measured specifications of every represented headset. In particular, dBFS is not dB SPL.
 
 ### Passive profiles and evidence
 
 Passive attenuation is interpolated in log-frequency from per-profile band data and fitted to stable minimum-phase filters. Evidence is stored with each profile:
 
-- Peltor ComTac II uses a published model-specific ANSI attenuation table;
-- Sordin and CENS use explicitly identified family-surrogate measurements;
-- products without suitable measurements use a shared construction-class proposal rather than invented product-specific performance.
+- ComTac II, V, and VI use selected published attenuation tables;
+- ComTac IV and TEP-300 use explicitly selected tip configurations;
+- Tactical Sport, Razor Digital, Sordin, and CENS use identified family, revision, or configuration transfers;
+- products without applicable measurements retain proposed curves; ordinary M32 does not inherit M32 Plus specifications;
+- modded Ops-Core AMP variants use the FAST RAC profile as a fallback.
 
-The `Headset Fit` F12 setting currently adjusts the separate gameplay exposure estimate derived from the equipped EFT headset threshold. It does not rewrite the measured or surrogate frequency curve used by the `Realistic` audio path.
+The [headset reference](docs/reference/headphones/README.md) inventories 29 installed-game items across 15 physical models/families, including modded items. The [runtime calibration](docs/reference/headphones/runtime-calibration-0.20.0.md) records the selected source tables. Full mean-attenuation points drive the filters; SD and APV remain separate evidence and are not subtracted again. NRR/SNR, speaker bandwidth, and advertised output levels do not supply missing compressor parameters.
 
-The model covers world audio, including spatial speech and VOIP. UI, music, inventory-interface sounds, and nonspatial chat are outside the external acoustic field. If the headset ID is unknown, the mixer route is incomplete, or the native DSP is unavailable, the entire headset route returns to `Vanilla`; partial hybrid activation is not accepted.
+The `Headset Fit` F12 setting adjusts the separate gameplay exposure estimate derived from the equipped EFT headset threshold. It does not rewrite the measured or surrogate frequency curve used by the `Realistic` audio path.
 
-## Why the model is structured this way
+The model covers world audio, including spatial speech and VOIP. UI, music, inventory-interface sounds, and nonspatial chat are outside the external acoustic field. If the headset ID is unknown, the mixer route is incomplete, or the native DSP is unavailable, the entire headset route returns to `Vanilla`.
 
-- EFT's recordings retain weapon identity better than a generic synthesized impulse, so every added gunshot layer is derived from the selected recording.
-- Projectile energy is useful for ordering cartridges but is not muzzle-blast energy, so it is only a small logarithmic correction on top of cartridge families.
-- Normalization happens before cartridge weighting, user gain, occlusion, and hearing protection so it cannot erase the distinctions those stages are meant to create.
-- Automatic fire follows gameplay shot events and authored body boundaries because waveform-onset guesses and streaming callback timing can drop or delay reports.
-- Indoor response reuses EFT's own reflection sources because the mod has no trustworthy room geometry or material model from which to synthesize a better field.
-- Hearing dose is accumulated separately from gunshot playback because perceived after-effects persist after the source clip ends and must combine across a burst.
-- Active headsets use passive and electronic paths in parallel because physical isolation never switches off, while the external microphone path is level dependent.
-- Unknown routes fall back as a complete unit because a half-active headset or a delayed cold-cache report is less coherent than preserving stock behavior.
+## Headset inspection
+
+Inspection reads the same client-side profile as the Realistic DSP; no server item-template changes are required. Realistic displays passive attenuation as three arithmetic averages of the available reference points: low (63 Hz to below 500 Hz), mid (500 Hz to below 2 kHz), and high (2–8 kHz), plus compressor release and quiet gain. These averages simplify the interface only; audio calculations retain the full curve.
+
+Vanilla displays only its compressor release and gain. Characteristic labels do not carry a mode prefix. An asterisk marks a family-surrogate or proposed value, not every value calculated from a documented curve. Unknown headset profiles retain the stock route.
+
+## Explosion exposure and recovery
+
+Grenade playback enters the headset world-audio path. Its hearing after-effect is separate from shot accumulation. Let `d` be distance in metres, `R` the outdoor close-blast radius, `M` the indoor radius multiplier, and `P` the passive low-band protection estimate in dB:
+
+```text
+outdoor exposure = (R / max(0.25, d))^2 * 10^(-P / 10)
+indoor exposure  = (R * M / max(0.25, d)) * 10^(-P / 10)
+severity         = clamp(exposure, 0, 1) * barrierTransmission
+```
+
+The indoor branch requires both the explosion source and the listener to be indoors. A grenade inside a building does not grant the indoor multiplier to a player outside. These are relative gameplay exposure laws, not calibrated blast-pressure predictions; the indoor branch falls as inverse distance.
+
+For a potentially relevant blast, three rays run to the player's head from a vertical equilateral triangle facing the player horizontally. Its side is 2 m, one vertex points upward, and its lower edge is 10 cm above the grenade position. A barrier counts only when all three rays intersect the same identified surface. Each common concrete surface multiplies exposure by 0.5; each other common surface by 0.75. Repeated hits on the same surface are deduplicated, and player/body equipment colliders are excluded. This approximation modifies hearing exposure, not EFT's original sound propagation, and does not resolve wall thickness, diffraction, or reflection paths.
+
+Exposure begins after `d / 340 + 0.12` seconds and ramps in over 0.1 seconds, allowing the initial explosion transient to precede the hearing loss. Ordinary events recover linearly; their configured hearing-loss and ringing durations scale with the square root of severity. At maximum severity, the close-blast duration extends the enabled effects: after onset, the first half holds a plateau and the second half recovers linearly. Overlapping blast responses use their maximum rather than an unbounded sum.
+
+Explosion hearing loss and ringing each have independent strength and duration settings. The close-blast duration is a separate control. Default values are 45 s hearing loss, 90 s ringing, and 180 s close-blast recovery; the outdoor radius is 5 m and the indoor multiplier is 3. Protection and intervening barriers can prevent maximum severity even inside the nominal close-blast radius.
+
+## F12 organization and defaults
+
+Sections are ordered `General`, `Gunshots`, `Explosions`, then `Low-level & debug`. Low-level controls are advanced entries, hidden until the Configuration Manager's Advanced toggle is enabled. General contains the master switch, preset, headset mode, and fit. Shot and explosion effects have their own sections.
+
+Default settings are Balanced, Realistic, Tight fit; shot impact 160%, contrast 8 dB, indoor emphasis 100%, hearing-loss/ringing intensity and duration 100%, and ear difference 140%. The added layer defaults to PitchedCopy / CachedReport / FullReportPerShot, 12 semitones down, normalization 100%, cartridge contrast 200%, 10.00001–2000 Hz filtering, 50% fade, 30 ms fallback decay, +20 dB copy gain, inherited occlusion, and a 500.4695 Hz fully occluded cutoff. Per-shot logging is enabled by default. Existing saved configuration values take precedence over these defaults.
 
 ## Limitations and interpretation
 
@@ -227,8 +252,6 @@ The model covers world audio, including spatial speech and VOIP. UI, music, inve
 - The cartridge model cannot infer propellant mass, muzzle pressure, barrel length, or exact directivity from every EFT template.
 - Binary indoor/outdoor state cannot describe room size or materials.
 - Minimum-phase filters approximate magnitude-only headset tables; they do not reproduce measured impulse phase.
-- Most headset electronics profiles remain provisional until product-specific input/output and timing measurements are available.
+- Electronic gain and timing values without product-specific measurements are engineering approximations.
 - Local bounded stages do not prove final device headroom after EFT's complete nonlinear mixer and the user's operating-system audio chain.
-- Tests and offline renders establish deterministic implementation behavior. Audible balance, transitions, and comfort require controlled in-raid listening with the actual release build.
-
-These boundaries are intentional. The model prefers a traceable approximation and a complete fallback over an impressive but unsupported claim.
+- Tests and offline renders establish deterministic implementation behavior. Audible balance, transitions, and comfort require controlled in-raid listening with the installed build.
