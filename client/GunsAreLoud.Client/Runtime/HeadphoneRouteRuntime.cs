@@ -20,6 +20,7 @@ namespace GunsAreLoud.Client.Runtime
 
         private ModConfig _config;
         private HeadphoneRouteController _controller;
+        private TransactionalMixerHeadphoneRoute _backend;
         private AudioMixer _boundMixer;
         private int _boundSampleRate;
         private SmoothedMixerParameterStore _smoothStore;
@@ -35,6 +36,17 @@ namespace GunsAreLoud.Client.Runtime
             ? _controller.Status
             : default;
 
+        internal bool VerifyConnection(out string reason)
+        {
+            if (!HeadphoneMixerAsset.Owns(_boundMixer) || _backend == null ||
+                !Singleton<BetterAudio>.Instantiated || Singleton<BetterAudio>.Instance == null ||
+                Singleton<BetterAudio>.Instance.Master != _boundMixer)
+            { reason = "GAL mixer is not bound to the game audio route"; return false; }
+            if (_smoothStore?.IsTransitioning == true || _nativeUpdate)
+            { reason = "route transition in progress"; return false; }
+            return _backend.VerifyActive(out reason);
+        }
+
         internal void Initialize(ModConfig config)
         {
             Instance = this;
@@ -48,6 +60,7 @@ namespace GunsAreLoud.Client.Runtime
 
         private void Update()
         {
+            HeadphoneMixerAsset.SyncGlobalControls();
             _smoothStore?.Tick(Time.unscaledDeltaTime);
             RepairAfterTinnitusIfDue();
             if (_nativeUpdate && (NativeFadeIsRunning() || _smoothStore?.IsTransitioning == true))
@@ -75,10 +88,8 @@ namespace GunsAreLoud.Client.Runtime
                 _smoothStore = HeadphoneMixerAsset.Owns(mixer) && mixer != null
                     ? new SmoothedMixerParameterStore(mixer)
                     : null;
-                _controller = new HeadphoneRouteController(
-                    _smoothStore != null
-                        ? new TransactionalMixerHeadphoneRoute(_smoothStore, sampleRate)
-                        : null);
+                _backend = _smoothStore != null ? new TransactionalMixerHeadphoneRoute(_smoothStore, sampleRate) : null;
+                _controller = new HeadphoneRouteController(_backend);
                 force = true;
             }
 
@@ -179,6 +190,7 @@ namespace GunsAreLoud.Client.Runtime
             _controller?.RestoreForShutdown();
             _smoothStore?.Flush();
             _controller = null;
+            _backend = null;
             _smoothStore = null;
             _boundMixer = null;
             _boundSampleRate = 0;

@@ -6,6 +6,34 @@ namespace GunsAreLoud.Tests
 {
     public sealed class GrenadeRouteAndMixerStateTests
     {
+        [Test]
+        public void SharedGlobalControlsFollowRaidFadeAndSubsequentMenuMute()
+        {
+            var menu = new ControlStore(); var raid = new ControlStore();
+            menu.Values["nvqIkjL"] = -80;
+            var bridge = new HeadphoneGlobalControlBridge(menu, raid);
+            Assert.That(bridge.Tick(), Is.True);
+            Assert.That(raid.Values["nvqIkjL"], Is.EqualTo(-80));
+            raid.Values["nvqIkjL"] = -20;
+            bridge.Tick();
+            Assert.That(menu.Values["nvqIkjL"], Is.EqualTo(-20));
+            raid.Values["nvqIkjL"] = 0;
+            bridge.Tick();
+            Assert.That(menu.Values["nvqIkjL"], Is.Zero);
+            menu.Values["nvqIkjL"] = -80;
+            bridge.Tick();
+            Assert.That(raid.Values["nvqIkjL"], Is.EqualTo(-80));
+            Assert.That(raid.Values.ContainsKey("GAL_ElectronicsWet"), Is.False);
+            Assert.That(raid.Values.ContainsKey("GunsVolume"), Is.False);
+        }
+
+        private sealed class ControlStore : GunsAreLoud.Client.Runtime.IMixerParameterStore
+        {
+            internal readonly System.Collections.Generic.Dictionary<string,float> Values = new System.Collections.Generic.Dictionary<string,float>();
+            public bool TryGet(string key, out float value) { Values.TryGetValue(key, out value); return true; }
+            public bool TrySet(string key, float value) { Values[key] = value; return true; }
+        }
+
         [TestCase(0f, 0f, true)]
         [TestCase(-80f, 0f, false)]
         [TestCase(-12f, -12.00001f, true)]

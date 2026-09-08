@@ -19,3 +19,6 @@ blueprints/
 # Local extracted game recordings and analysis scratch files
 samples/
 tmp/
+
+# Local registration experiments and machine-specific test scripts
+experiments/

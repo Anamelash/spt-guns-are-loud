@@ -1,3 +1,5 @@
+> Current archive installation uses the included BepInEx preloader and compiled DSP, without game-file patches. The loader requires the exact supported UnityPlayer hash from SPT 4.1.5. Metadata registration instructions below describe the legacy development workflow only.
+
 # Headphone mixer generator
 
 Use Unity 2022.3.43f1. Create a minimal project at
@@ -44,14 +46,12 @@ produces approximately +12.0412 dB at the band center. The parameter labelled
 octaves. Native spectral, shared-detector and Vanilla-equivalence checks remain
 required before embedding or installing a candidate bundle.
 
-## Native effect registration
+## Legacy install-time registration
 
 Unity 2022.3 has no managed runtime API for registering a new native mixer
 effect. `install-native-plugin.ps1` can register the pinned
 `AudioPluginGalHeadphones.dll` in the exact supported isolated installation's
-serialized `BuildSettings.preloadedPlugins` before the player starts. The
-ordinary client-only package does not run this installer or satisfy this native
-prerequisite; without it, Realistic mode must remain on its Vanilla fallback.
+serialized `BuildSettings.preloadedPlugins` before the player starts. The current release does not run this installer: its BepInEx preloader registers the native effect in memory instead.
 
 The default is a read-only dry run:
 

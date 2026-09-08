@@ -255,3 +255,12 @@ Default settings are Balanced, Realistic, Tight fit; shot impact 160%, contrast 
 - Electronic gain and timing values without product-specific measurements are engineering approximations.
 - Local bounded stages do not prove final device headroom after EFT's complete nonlinear mixer and the user's operating-system audio chain.
 - Tests and offline renders establish deterministic implementation behavior. Audible balance, transitions, and comfort require controlled in-raid listening with the installed build.
+
+
+## Native loading and global controls (1.0.0)
+
+The packaged BepInEx preloader loads the DSP before raid mixer assets and registers its audio definitions through an internal UnityPlayer function. Both binaries are SHA-256 guarded. Registration uses memory only; game metadata is untouched. Unsupported builds fail closed. Instance creation and advancing DSP callbacks are checked separately from DLL presence.
+
+Menu and BetterAudio retain separate mixer objects. Master, InGame, UI, Chat, Music and Hideout volume controls are synchronized in both directions, preserving raid fades and subsequent settings changes. Headset profile/category controls are excluded.
+
+The complete package was installed by the user from the 0.23.3 candidate archive after removing the legacy installation and restoring original game metadata. All three installed DLLs matched the archive. Normal launcher/raid logs confirmed BepInEx registration, one native DSP instance, ComTac V Realistic activation without fallback, return to Vanilla after headset removal, and restored global world volume. The user reported working sound. Version 1.0.0 promotes this implementation with release version and documentation changes; it does not claim exhaustive acoustic validation of every headset or scene.

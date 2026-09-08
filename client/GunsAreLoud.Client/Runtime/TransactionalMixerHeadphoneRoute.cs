@@ -68,6 +68,7 @@ namespace GunsAreLoud.Client.Runtime
         private readonly IHeadphoneNativeEqProvider _fits;
         private readonly Dictionary<string, float> _vanilla = new Dictionary<string, float>();
         private bool _active;
+        private Dictionary<string, float> _expected;
         private bool _restorePending;
         private int _resetGeneration;
 
@@ -107,6 +108,7 @@ namespace GunsAreLoud.Client.Runtime
                 }
             }
             _active = true;
+            _expected = values;
             _resetGeneration = nextReset;
             reason = "";
             return true;
@@ -117,6 +119,20 @@ namespace GunsAreLoud.Client.Runtime
             bool ok = Rollback();
             reason = ok ? "" : "one or more vanilla mixer parameters could not be restored";
             return ok;
+        }
+
+        internal bool VerifyActive(out string reason)
+        {
+            if (!_active || _restorePending || _expected == null)
+            { reason = "route not active"; return false; }
+            foreach (var item in _expected)
+            {
+                if (!_mixer.TryGet(item.Key, out float actual) || float.IsNaN(actual) || float.IsInfinity(actual) ||
+                    Math.Abs(actual - item.Value) > Math.Max(0.001f, Math.Abs(item.Value) * 0.0001f))
+                { reason = "mixer readback mismatch: " + item.Key; return false; }
+            }
+            reason = "all profile and routing parameters verified";
+            return true;
         }
 
         private bool TrySnapshot(out string reason)
@@ -145,6 +161,7 @@ namespace GunsAreLoud.Client.Runtime
             {
                 _vanilla.Clear();
                 _active = false;
+                _expected = null;
                 _restorePending = false;
             }
             else _restorePending = true;

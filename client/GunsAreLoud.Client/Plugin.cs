@@ -12,7 +12,7 @@ namespace GunsAreLoud.Client
     {
         public const string Guid = "com.anamelash.gunsareloud";
         public const string Name = "Guns Are Loud";
-        public const string Version = "0.23.2";
+        public const string Version = "1.0.0";
 
         internal static ManualLogSource Log { get; private set; }
 

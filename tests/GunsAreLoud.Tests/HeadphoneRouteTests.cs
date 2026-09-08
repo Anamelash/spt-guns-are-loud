@@ -193,6 +193,25 @@ namespace GunsAreLoud.Tests
                 Assert.That(store.Values[item.Key], Is.EqualTo(item.Value), item.Key);
         }
 
+        [TestCase("GAL_ElectronicsWet", 0f)]
+        [TestCase("GAL_ElectronicsGunsSend", -80f)]
+        [TestCase("GAL_PassiveBand1Gain", float.NaN)]
+        public void DiagnosticsRejectDisconnectedOrCorruptedLiveMixer(string parameter, float value)
+        {
+            var store = new MixerStore();
+            var route = new TransactionalMixerHeadphoneRoute(store, 48000, ImmediateFitProvider.Instance);
+            Assert.That(HeadsetProfileRegistry.TryGet(Sordin, out HeadsetProfile profile), Is.True);
+            Assert.That(route.TryActivate(profile, out _), Is.True);
+            Assert.That(route.VerifyActive(out _), Is.True);
+            int writes = store.WriteCount;
+            store.Values[parameter] = value;
+            Assert.That(route.VerifyActive(out string reason), Is.False);
+            Assert.That(reason, Does.Contain(parameter));
+            Assert.That(store.WriteCount, Is.EqualTo(writes), "diagnostics must be read-only");
+            Assert.That(route.TryRestore(out _), Is.True);
+            Assert.That(route.VerifyActive(out _), Is.False);
+        }
+
         private sealed class Backend : IHeadphoneRouteBackend
         {
             internal int Activations, Restores;

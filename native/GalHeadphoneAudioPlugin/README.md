@@ -1,3 +1,5 @@
+> Current archive installation uses the included BepInEx preloader and compiled DSP, without game-file patches. The loader requires the exact supported UnityPlayer hash from SPT 4.1.5. Metadata registration instructions below describe the legacy development workflow only.
+
 # GAL Headphone Electronics native DSP
 
 Windows x64 Unity native audio effect implementing the common, stereo-linked
@@ -15,12 +17,14 @@ mixer containing `GAL Headphone Electronics` is loaded. ABI tests and Unity
 Editor enumeration are prerequisite evidence; they do not establish that the
 effect is installed in EFT or accepted in a live raid.
 
-EFT exposes no supported managed API for late native-audio-effect registration.
-The integration route is install-time: add the DLL name to the player's
-`BuildSettings.preloadedPlugins` and place the DLL in the player's
-`Plugins/x86_64` directory before process launch. The guarded dry-run/apply/
-restore workflow is documented in `build/headphones/README.md`; a client-only
-BepInEx package does not perform these changes.
+EFT exposes no public managed API for native audio-effect registration. The
+release includes `GunsAreLoud.Preloader.dll`, which registers this DSP through
+a hash-guarded internal UnityPlayer function during BepInEx preload. It leaves
+game metadata untouched. The build-specific entry point and registry layout
+are documented by the preloader source; other player hashes fail closed.
+
+The old `BuildSettings.preloadedPlugins` patch in `build/headphones` is retained
+only for the historical development installation. It is not used by the release.
 
 The passive ParamEQ controls live in the mixer rather than this DSP. Unity
 2022.3 calibration identifies `Frequency gain` as the biquad coefficient

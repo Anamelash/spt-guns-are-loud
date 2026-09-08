@@ -11,6 +11,8 @@ namespace GunsAreLoud.Client.Configuration
         public bool? Browsable;
         public bool? IsAdvanced;
         public int? Order;
+        public System.Action<ConfigEntryBase> CustomDrawer;
+        public bool? HideDefaultButton;
     }
 
     internal enum LoudnessPreset
@@ -357,6 +359,10 @@ namespace GunsAreLoud.Client.Configuration
                 HeadphonesFitPreset.Tight,
                 "Loose represents a compromised seal; Normal uses the baseline protection estimate; Tight represents a good seal. This setting affects the gameplay hearing-dose model, not the Realistic headset filter curve.");
 
+            Bind(config, "01. General", "Headset Diagnostics", "Live status (not a setting)",
+                new ConfigDescription("Live native DSP and mixer connection checks. Counters measure processing calls, not perceived sound quality.", null,
+                    new ConfigurationManagerAttributes { CustomDrawer = Audio.HeadphoneDiagnostics.Draw, HideDefaultButton = true }));
+
             // Retain the inactive value through the same migration as visible settings.
             // Configuration Manager recognizes the tag by reflection and hides it.
             IndoorHeadphonesDampingPercent = Bind(config,
@@ -411,7 +417,7 @@ namespace GunsAreLoud.Client.Configuration
         private static int SettingOrder(string key)
         {
             string[] keys = {
-                "Enabled", "Preset", "Headset Processing", "Headset Fit",
+                "Enabled", "Preset", "Headset Processing", "Headset Fit", "Headset Diagnostics",
                 "Gunshot Impact", "Gunshot Contrast, dB", "Indoor Emphasis",
                 "Hearing Loss Intensity, %", "Hearing Loss Duration, %",
                 "Ringing Intensity, %", "Ringing Duration, %", "Left/Right Ear Difference",

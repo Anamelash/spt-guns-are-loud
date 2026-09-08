@@ -1,5 +1,12 @@
 # Changes from vanilla
 
+## 1.0.0 - installation and audio routing
+
+- Includes the BepInEx preloader and native DSP; no separate compilation or game-file registration is needed on the supported player build.
+- Synchronizes global volume controls between menu and replacement mixers, fixing muted world audio while interface sounds play.
+- Adds concise F12 statuses: DSP loading, DSP ready, DSP active and DSP error.
+- Rejects incomplete mixer loading and requires the mixer asset during compilation.
+
 ## Gunfire
 
 - Your first-person shots have a fuller low end and more pronounced impact, while retaining EFT's original weapon recordings.

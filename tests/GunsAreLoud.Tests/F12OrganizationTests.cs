@@ -13,7 +13,7 @@ namespace GunsAreLoud.Tests
         {
             var file = new ConfigFile(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
             var config = new ModConfig(file);
-            var assembly = System.Reflection.Assembly.Load(File.ReadAllBytes(@"D:\Games\SPT_4.1.3\BepInEx\plugins\spt\ConfigurationManager\ConfigurationManager.dll"));
+            var assembly = System.Reflection.Assembly.Load(File.ReadAllBytes(@"D:\Games\SPT_4.1.5\BepInEx\plugins\spt\ConfigurationManager\ConfigurationManager.dll"));
             var type = assembly.GetType("ConfigurationManager.ConfigSettingEntry", true);
             foreach (var pair in file)
             {
@@ -24,6 +24,11 @@ namespace GunsAreLoud.Tests
                     Assert.That(type.GetProperty("Browsable").GetValue(parsed), Is.EqualTo(false));
                 if (pair.Key.Key == "Enabled")
                     Assert.That(type.GetProperty("Order").GetValue(parsed), Is.EqualTo(1000));
+                if (pair.Key.Key == "Headset Diagnostics")
+                {
+                    Assert.That(type.GetProperty("CustomDrawer").GetValue(parsed), Is.Not.Null);
+                    Assert.That(type.GetProperty("HideDefaultButton").GetValue(parsed), Is.EqualTo(true));
+                }
             }
             Assert.That(file.Select(p => p.Key.Section).Distinct(), Is.EqualTo(new[] {
                 "01. General", "02. Gunshots", "03. Explosions", "04. Low-level & debug" }));

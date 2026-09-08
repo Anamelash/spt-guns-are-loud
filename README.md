@@ -12,6 +12,22 @@ Read [CHANGELOG.md](CHANGELOG.md) for the player-visible differences from vanill
 
 ## Installation
 
-The client archive targets SPT 4.1.5. With the game closed, extract it into the SPT installation root so that `GunsAreLoud.Client.dll` is under `BepInEx/plugins/GunsAreLoud`. Existing configuration files are preserved.
+Version 1.0.0.
 
-**The client archive alone does not activate Realistic headset processing.** It requires the native GAL audio effect to be registered before Unity starts. Without that prerequisite, headset audio uses Vanilla fallback. The [native registration tooling](build/headphones/README.md) is locked to the development installation and is not a portable end-user installer. Gunshot and explosion hearing features do not require that native headset effect.
+The archive targets SPT 4.1.5 on Windows x64 with the verified Unity 2022.3.43f1 player build. Close the game and extract the archive into the SPT installation root. Merge the BepInEx folders; do not replace the whole BepInEx directory.
+
+Included components:
+
+- `BepInEx/plugins/GunsAreLoud/GunsAreLoud.Client.dll` (client and embedded mixer).
+- `BepInEx/patchers/GunsAreLoud/GunsAreLoud.Preloader.dll` (early registration).
+- `BepInEx/patchers/GunsAreLoud/AudioPluginGalHeadphones.dll` (native DSP).
+
+Launch through the SPT launcher. No Unity Editor, compilation, separate installer or game-file patch is required. Existing configuration is preserved. The preloader checks exact UnityPlayer and DSP hashes; other player builds are not automatically supported.
+
+F12 / General / Headset Diagnostics displays `DSP loading`, `DSP ready`, `DSP active` or `DSP error`. Active requires a verified Realistic route and advancing native processing counters. Loading is expected before the raid mixer is requested. Ready means the DSP is available but active processing is not currently confirmed, including Vanilla/no-headset use.
+
+## Uninstallation
+
+Close the game and remove `BepInEx/plugins/GunsAreLoud` and `BepInEx/patchers/GunsAreLoud`. Optionally remove `BepInEx/config/com.anamelash.gunsareloud.cfg` to reset settings. This archive does not modify globalgamemanagers or install files in the game's native Plugins directory.
+
+Older development installations with manual native registration must first restore their own original metadata backup and remove the legacy native DLL. Do not remove that DLL while leaving its old preload entry in game metadata.

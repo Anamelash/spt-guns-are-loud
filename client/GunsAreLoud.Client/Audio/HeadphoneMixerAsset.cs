@@ -22,11 +22,33 @@ namespace GunsAreLoud.Client.Audio
         private static AssetBundle _bundle;
         private static AudioMixer _mixer;
         private static bool _attempted;
+        private static HeadphoneGlobalControlBridge _globalControls;
+        private static float _nextControlLog;
+        private static string _lastControlLog;
+        internal static void SyncGlobalControls()
+        {
+            if (_globalControls == null || _mixer == null) return;
+            bool ok = _globalControls.Tick();
+            if (Time.unscaledTime < _nextControlLog) return;
+            _nextControlLog = Time.unscaledTime + 1f;
+            _mixer.GetFloat("nvqIkjL", out float inGame);
+            _mixer.GetFloat("OtWVUHN", out float master);
+            _mixer.GetFloat("MainVolume", out float main);
+            _mixer.GetFloat("GunsVolume", out float guns);
+            string value = $"bridge={ok} InGame={inGame:0.0}dB Master={master:0.0}dB Main={main:0.0}dB Guns={guns:0.0}dB";
+            if (value == _lastControlLog) return;
+            _lastControlLog = value;
+            Plugin.Log?.LogInfo("Headphone global mixer controls: " + value);
+        }
+        internal static bool LoadAttempted => _attempted;
+        internal static string LoadFailure { get; private set; }
+        internal static bool HookInstalled { get; set; }
 
         internal static bool Owns(AudioMixer mixer) => _mixer != null && mixer == _mixer;
 
         internal static async Task<AudioMixer> LoadMaster(BetterAudio audio, string path, CancellationTokenSource tokenSource)
         {
+            Plugin.Log?.LogInfo("Headphone mixer load hook reached: " + path);
             AudioMixer original = await audio.LoadObjectAsync<AudioMixer>(path, tokenSource);
             if (original == null || tokenSource.IsCancellationRequested || path != "Audio/MasterMixer") return original;
             return GetOrLoad(original) ?? original;
@@ -42,7 +64,7 @@ namespace GunsAreLoud.Client.Audio
                     throw new InvalidOperationException(nativeReason);
                 using (Stream stream = typeof(HeadphoneMixerAsset).Assembly.GetManifestResourceStream(ResourceName))
                 {
-                    if (stream == null) return null;
+                    if (stream == null) throw new InvalidOperationException("embedded headphone mixer is missing from client DLL");
                     using (var bytes = new MemoryStream())
                     {
                         stream.CopyTo(bytes);
@@ -56,6 +78,8 @@ namespace GunsAreLoud.Client.Audio
                     if (!candidate.GetFloat(parameter, out _))
                         throw new InvalidOperationException("headphone mixer parameter missing: " + parameter);
                 ValidateStockContract(original, candidate);
+                if (HeadphoneNativePlugin.InstanceCount != 1)
+                    throw new InvalidOperationException("expected one native headphone DSP instance, found " + HeadphoneNativePlugin.InstanceCount);
                 if (!candidate.GetFloat("GAL_PassiveVolume", out float passiveVolume) || Math.Abs(passiveVolume) > 0.00001f)
                     throw new InvalidOperationException("passive bus is not neutral by default");
                 for (int band = 1; band <= 9; band++)
@@ -72,15 +96,21 @@ namespace GunsAreLoud.Client.Audio
                     if (candidate.FindMatchingGroups(path).Length == 0)
                         throw new InvalidOperationException("headphone route group missing: " + path);
                 _mixer = candidate;
+                _globalControls = new HeadphoneGlobalControlBridge(
+                    new Runtime.UnityMixerParameterStore(original), new Runtime.UnityMixerParameterStore(candidate));
+                if (!_globalControls.Tick()) throw new InvalidOperationException("global mixer control bridge initialization failed");
                 Plugin.Log?.LogInfo("Headphone replacement mixer loaded before audio source pools; native instances=" +
                     HeadphoneNativePlugin.InstanceCount);
                 return _mixer;
             }
             catch (Exception error)
             {
+                LoadFailure = error.Message;
                 Plugin.Log?.LogWarning("Headphone mixer unavailable; preserving EFT mixer: " + error.Message);
                 if (_bundle != null) _bundle.Unload(true);
                 _bundle = null;
+                _mixer = null;
+                _globalControls = null;
                 return null;
             }
         }
@@ -164,6 +194,8 @@ namespace GunsAreLoud.Client.Audio
             }
             matches[0].opcode = OpCodes.Call;
             matches[0].operand = AccessTools.Method(typeof(HeadphoneMixerAsset), nameof(HeadphoneMixerAsset.LoadMaster));
+            HeadphoneMixerAsset.HookInstalled = true;
+            Plugin.Log?.LogInfo("Headphone mixer load hook installed");
             return code;
         }
     }
