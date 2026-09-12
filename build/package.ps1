@@ -53,6 +53,7 @@ foreach ($document in @("README.md", "MODEL.md")) {
     $text = [IO.File]::ReadAllText($documentPath)
     $text = $text.Replace("](docs/", "](https://github.com/Anamelash/spt-guns-are-loud/blob/v$version/docs/")
     $text = $text.Replace("](build/", "](https://github.com/Anamelash/spt-guns-are-loud/blob/v$version/build/")
+    $text = $text.Replace("](assets/", "](https://raw.githubusercontent.com/Anamelash/spt-guns-are-loud/v$version/assets/")
     [IO.File]::WriteAllText($documentPath, $text)
 }
 

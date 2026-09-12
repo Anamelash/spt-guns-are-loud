@@ -1,6 +1,6 @@
 """Compare original stock DSP graph with a generated candidate by persistent GUID.
 
-Run with uv run --with UnityPy python ... ORIGINAL_JSON CANDIDATE_BUNDLE.
+Run with uv run --with UnityPy python ... ORIGINAL_JSON CANDIDATE_BUNDLE ROUTE_MANIFEST.
 Checks native compiled DSP data, not only exposed editor properties.
 """
 import json
@@ -12,9 +12,20 @@ original = json.loads(Path(sys.argv[1]).read_text())['m_MixerConstant']
 env = UnityPy.load(sys.argv[2])
 candidate = next(o.read_typetree()['m_MixerConstant'] for o in env.objects
                  if o.type.name == 'AudioMixerController')
+routes = [line.split('|') for line in Path(sys.argv[3]).read_text().splitlines() if line]
+assert all(len(route) == 3 for route in routes), 'Malformed contrast route manifest'
 def guid(g): return tuple(g.values())
 def table(d, key): return {guid(g): i for i,g in enumerate(d[key+'GUIDs'])}
 def names(d): return bytes(d['groupNameBuffer']).decode().strip('\0').split('\0')
+def paths(d):
+    group_names=names(d); result=[]
+    for index in range(len(d['groups'])):
+        parts=[]; current=index
+        while current not in (-1,0xffffffff):
+            parts.append(group_names[current])
+            current=d['groups'][current]['parentConstantIndex']
+        result.append('/'.join(reversed(parts)))
+    return result
 def value(d, ix):
     if ix == 0xffffffff: return None
     return {s['nameHash']: s['values'][ix] for s in d['snapshots']}
@@ -94,9 +105,19 @@ native = [e for _,e in electronic_effects if e['type']>=1000]
 assert len(native)==1 and len(native[0]['parameterIndices'])==12
 for slot in (10,11):
     assert set(value(candidate,native[0]['parameterIndices'][slot]).values())=={0}, 'Wet/reset not neutral'
+candidate_paths=paths(candidate)
+contrast_indices=[i for i,path in enumerate(candidate_paths)
+                  if new_names[i]=='GAL Contrast Input']
+expected_paths={'Master/InGame/'+route[1] for route in routes}
+assert len(routes)==52 and len(expected_paths)==52, 'Expected 52 unique mapped contrast routes'
+assert {candidate_paths[i] for i in contrast_indices}==expected_paths, 'Compiled contrast route map differs from manifest'
+for index in contrast_indices:
+    route_effects=[e for e in effects if e['groupConstantIndex']==index]
+    assert [e['type'] for e in route_effects]==[-2], 'Contrast input must contain only one attenuation fader'
+    assert set(value(candidate,candidate['groups'][index]['volumeIndex']).values())=={0}, 'Contrast input not neutral'
 report={'originalGroups':len(old_groups),'originalEffects':len(original['effects']),
         'originalExposed':len(old_exposed),'candidateEffects':len(candidate['effects']),
-        'electronicsFeeds':len(sends),
+        'electronicsFeeds':len(sends),'contrastInputs':len(contrast_indices),
         'differences':errors}
 print(json.dumps(report,indent=2))
 sys.exit(bool(errors))

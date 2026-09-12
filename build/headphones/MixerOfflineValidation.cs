@@ -7,6 +7,7 @@ using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Audio;
 using UnityEngine.Experimental.Audio;
+using GunsAreLoud.Client.Audio;
 
 [InitializeOnLoad]
 public static class MixerOfflineValidation
@@ -39,6 +40,10 @@ public static class MixerOfflineValidation
         public float restoreMaxError, restoreRmsError;
         public bool electronicsCoverage;
         public float[] electronicsCategoryRms;
+        public int contrastRoutesChecked;
+        public float contrastNeutralMaxError, contrastNeutralRmsError;
+        public float contrastScaledMaxError, contrastScaledRmsError;
+        public bool contrastEquivalent;
     }
     [Serializable] private sealed class FitSettings { public string profileId; public float baseVolumeDb; public FitBand[] bands; }
     [Serializable] private sealed class FitBand { public float frequencyHz, linearGain, octaveRange, targetAttenuationDb; }
@@ -110,6 +115,43 @@ public static class MixerOfflineValidation
         }
         report.vanillaIdentity = report.vanillaMaxError <= 0.00001f && report.vanillaRmsError <= 0.000001f;
 
+        // Compiled-graph validation covers all 52 nodes. Render representative
+        // parent chains here to prove the neutral child is transparent and its
+        // fader is equivalent to the former pre-mixer per-source multiplier.
+        foreach (int routeIndex in new[] { 0, 2, 17, 18, 27, 48, 51 })
+        {
+            ContrastRouteSpec route = GunshotContrastMixerRouteTable.Routes[routeIndex];
+            float[] signal = TestSignal();
+            float[] direct = await Render(candidate, route.ParentPath, signal);
+            float[] neutral = await Render(candidate, route.InputPath, signal);
+            Compare(direct, neutral, out float neutralMax, out float neutralErrorRms);
+            report.contrastNeutralMaxError = Math.Max(report.contrastNeutralMaxError, neutralMax);
+            report.contrastNeutralRmsError = Math.Max(report.contrastNeutralRmsError, neutralErrorRms);
+
+            const float attenuationDb = 6f;
+            float gain = (float)Math.Pow(10, -attenuationDb / 20f);
+            float[] scaledSignal = (float[])signal.Clone();
+            for (int sample = 0; sample < scaledSignal.Length; sample++) scaledSignal[sample] *= gain;
+            float[] scaledReference = await Render(candidate, route.ParentPath, scaledSignal);
+            if (!candidate.SetFloat(route.Parameter, -attenuationDb))
+                throw new Exception("Missing contrast parameter " + route.Parameter);
+            float[] scaledInput = await Render(candidate, route.InputPath, signal);
+            if (!candidate.SetFloat(route.Parameter, 0f))
+                throw new Exception("Could not restore contrast parameter " + route.Parameter);
+            Compare(scaledReference, scaledInput, out float scaledMax, out float scaledRms);
+            Debug.Log("GAL_CONTRAST route=" + route.ParentPath +
+                " neutralMax=" + neutralMax + " neutralRms=" + neutralErrorRms +
+                " scaledMax=" + scaledMax + " scaledRms=" + scaledRms);
+            report.contrastScaledMaxError = Math.Max(report.contrastScaledMaxError, scaledMax);
+            report.contrastScaledRmsError = Math.Max(report.contrastScaledRmsError, scaledRms);
+            report.contrastRoutesChecked++;
+        }
+        report.contrastEquivalent = report.contrastRoutesChecked == 7 &&
+            report.contrastNeutralMaxError <= 0.00001f && report.contrastNeutralRmsError <= 0.000001f &&
+            // Unity's compiled dB fader is not bit-identical to multiplying the
+            // source floats with System.Math. Bound the residual below -80 dBFS.
+            report.contrastScaledMaxError <= 0.0001f && report.contrastScaledRmsError <= 0.00001f;
+
         FitSettings fit = JsonUtility.FromJson<FitSettings>(File.ReadAllText(Required("GAL_FIT_JSON")));
         if (Environment.GetEnvironmentVariable("GAL_EQ_PROBE") == "1")
         {
@@ -178,6 +220,7 @@ public static class MixerOfflineValidation
 
         File.WriteAllText(output, JsonUtility.ToJson(report, true));
         if (!report.vanillaIdentity) throw new Exception("Candidate Vanilla route differs from cloned baseline; see " + output);
+        if (!report.contrastEquivalent) throw new Exception("Contrast input differs from equivalent direct-source gain; see " + output);
         if (!report.passiveSpectral) throw new Exception("Passive route lacks the required frequency-dependent attenuation; see " + output);
         if (!report.electronicsLinked) throw new Exception("Electronics branch did not show shared stereo gain reduction; see " + output);
         if (!report.vanillaRestored) throw new Exception("Returning to Vanilla changed the stock route; see " + output);

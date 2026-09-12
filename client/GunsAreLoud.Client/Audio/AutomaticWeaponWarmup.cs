@@ -94,7 +94,7 @@ namespace GunsAreLoud.Client.Audio
     internal sealed class AutomaticWeaponWarmup : MonoBehaviour
     {
         private static int _instances;
-        private readonly Dictionary<string, Job> _jobs = new Dictionary<string, Job>();
+        private readonly Dictionary<JobKey, Job> _jobs = new Dictionary<JobKey, Job>();
         private readonly List<Job> _pending = new List<Job>();
         private readonly List<Recipe> _recipes = new List<Recipe>();
         private readonly HashSet<int> _plannedBodies = new HashSet<int>();
@@ -104,16 +104,32 @@ namespace GunsAreLoud.Client.Audio
         private float _nextDiscovery;
         private bool _failed;
 
+        private static bool _releasePending;
+
         private void Awake() { _instances++; }
 
         private void OnDestroy()
         {
-            if (--_instances == 0)
-            {
-                PitchedGunshotLayer.ReportPool?.StopAll();
-                AutomaticBeatClipCache.Clear();
-                LowEndNormalizationCache.Clear();
-            }
+            // A weapon swap destroys the old component before or after the new
+            // one is attached. Clearing here would wipe the cache for every swap
+            // and force a full re-decode mid-raid, so defer the decision a frame.
+            if (--_instances == 0) _releasePending = true;
+        }
+
+        /// <summary>
+        /// Frees the decoded caches once no local weapon is warmed any more.
+        /// Every pitched pool releases its voices first: the cached clips are
+        /// destroyed here and a stolen voice must not be left playing one.
+        /// </summary>
+        internal static bool ReleaseCachesIfIdle()
+        {
+            if (!_releasePending) return false;
+            _releasePending = false;
+            if (_instances != 0) return false;
+            PitchedGunshotLayer.StopAllLayers();
+            AutomaticCopyCache.Clear();
+            LowEndNormalizationCache.Clear();
+            return true;
         }
 
         internal static bool Attach(WeaponSoundPlayer weapon)
@@ -161,25 +177,29 @@ namespace GunsAreLoud.Client.Audio
                 _nextDiscovery = Time.unscaledTime + 0.5f;
                 // No listener is common during raid loading. Do not burn retries.
                 if (AudioRuntimeLookup.Listener == null) return;
-                SoundBank activeBody = _weapon.IsSilenced ? _weapon.BodySilenced : _weapon.Body;
-                SoundBank activeTail = _weapon.IsSilenced ? _weapon.TailSilenced : _weapon.Tail;
-                if (_weapon.IsAutoWeapon)
+                using (PerformanceTrace.Measure(PerformanceArea.WarmupPlan))
                 {
-                    PlanBank(activeBody, activeTail, (int)bridge.Environment, _weapon.IsSilenced);
-                    PlanBank(_weapon.Body, _weapon.Tail, (int)bridge.Environment, false);
-                    PlanBank(_weapon.BodySilenced, _weapon.TailSilenced, (int)bridge.Environment, true);
+                    SoundBank activeBody = _weapon.IsSilenced ? _weapon.BodySilenced : _weapon.Body;
+                    SoundBank activeTail = _weapon.IsSilenced ? _weapon.TailSilenced : _weapon.Tail;
+                    if (_weapon.IsAutoWeapon)
+                    {
+                        PlanBank(activeBody, activeTail, (int)bridge.Environment, _weapon.IsSilenced);
+                        PlanBank(_weapon.Body, _weapon.Tail, (int)bridge.Environment, false);
+                        PlanBank(_weapon.BodySilenced, _weapon.TailSilenced, (int)bridge.Environment, true);
+                    }
+                    else
+                    {
+                        PlanOneShot(activeBody, (int)bridge.Environment, _weapon.IsSilenced);
+                        PlanOneShot(_weapon.Body, (int)bridge.Environment, false);
+                        PlanOneShot(_weapon.BodySilenced, (int)bridge.Environment, true);
+                    }
+                    PlanOneShot(_weapon.IsSilenced ? _weapon.DoubletSilenced : _weapon.Doublet,
+                        (int)bridge.Environment, _weapon.IsSilenced);
+                    PlanOneShot(_weapon.Doublet, (int)bridge.Environment, false);
+                    PlanOneShot(_weapon.DoubletSilenced, (int)bridge.Environment, true);
                 }
-                else
-                {
-                    PlanOneShot(activeBody, (int)bridge.Environment, _weapon.IsSilenced);
-                    PlanOneShot(_weapon.Body, (int)bridge.Environment, false);
-                    PlanOneShot(_weapon.BodySilenced, (int)bridge.Environment, true);
-                }
-                PlanOneShot(_weapon.IsSilenced ? _weapon.DoubletSilenced : _weapon.Doublet,
-                    (int)bridge.Environment, _weapon.IsSilenced);
-                PlanOneShot(_weapon.Doublet, (int)bridge.Environment, false);
-                PlanOneShot(_weapon.DoubletSilenced, (int)bridge.Environment, true);
             }
+            bool loadedThisFrame = false;
             for (int index = 0; index < _workers.Length; index++)
             {
                 Worker worker = _workers[index];
@@ -189,22 +209,35 @@ namespace GunsAreLoud.Client.Audio
                     Job job = worker.Job;
                     if (job.Buffer.Complete)
                     {
-                        AutomaticBeatClipCache.FindOnsetFrame(job.Buffer.Samples, job.Frames, 2, out float peak);
+                        AutomaticCopyCache.FindOnsetFrame(job.Buffer.Samples, job.Frames, 2, out float peak);
                         job.Ready = peak >= 0.0005f;
                         worker.Stop();
-                        if (!job.Ready) Retry(job, "silent PCM");
-                        else if (job.Body)
-                            AutomaticBeatClipCache.Publish(job.Clip, job.Frames / (float)_rate,
-                                _rate, job.Frames, 2, job.Buffer.Samples, nativePitch: true);
-                        if (job.Ready && job.Normalize)
-                            LowEndNormalizationCache.Register(job.Clip, _rate, job.Buffer.Samples,
-                                job.ReferenceVolume, job.Group,
-                                job.Body ? job.Frames / (float)_rate : 0f);
+                        if (!job.Ready)
+                        {
+                            Retry(job, "silent PCM");
+                            if (job.Attempts >= 2) CompleteJob(job);
+                            else job.Buffer = null;
+                        }
+                        else
+                        {
+                            if (job.Body)
+                                using (PerformanceTrace.Measure(PerformanceArea.WarmupPublish))
+                                    AutomaticCopyCache.PublishRoundBody(job.Clip, job.Frames / (float)_rate,
+                                        _rate, job.Frames, 2, job.Buffer.Samples, nativePitch: true);
+                            if (job.Normalize)
+                                using (PerformanceTrace.Measure(PerformanceArea.WarmupRegister))
+                                    LowEndNormalizationCache.Register(job.Clip, _rate, job.Buffer.Samples,
+                                        job.ReferenceVolume, job.Group,
+                                        job.Body ? job.Frames / (float)_rate : 0f);
+                            CompleteJob(job);
+                        }
                     }
                     else if (!AudioListener.pause && Time.unscaledTime > worker.Deadline)
                     {
                         worker.Stop();
                         Retry(job, "decode timeout");
+                        if (job.Attempts >= 2) CompleteJob(job);
+                        else job.Buffer = null;
                     }
                 }
                 if (worker != null && worker.Job != null) continue;
@@ -214,16 +247,32 @@ namespace GunsAreLoud.Client.Audio
                 // decoding every lower-priority bank as a side effect.
                 for (int priority = 0; priority < 6 && next == null; priority++)
                 {
-                    foreach (Job candidate in _pending)
+                    for (int pendingIndex = 0; pendingIndex < _pending.Count; pendingIndex++)
                     {
-                        if (candidate.Ready || candidate.Running || candidate.Attempts >= 2 || candidate.Clip == null) continue;
+                        Job candidate = _pending[pendingIndex];
+                        if (candidate.Ready || candidate.Attempts >= 2 || candidate.Clip == null)
+                        {
+                            _pending.RemoveAt(pendingIndex--);
+                            continue;
+                        }
+                        if (candidate.Running) continue;
                         if (WarmupJobPriority.Calculate(candidate.Body, candidate.Normalize,
                             candidate.Group == activeGroup) != priority) continue;
-                        if (candidate.Clip.loadState == AudioDataLoadState.Unloaded) candidate.Clip.LoadAudioData();
+                        if (candidate.Clip.loadState == AudioDataLoadState.Unloaded)
+                        {
+                            // A clip that does not load in the background decodes
+                            // inside this call. One per frame, whichever kind it
+                            // is, so a bank of them cannot be started at once.
+                            if (loadedThisFrame) continue;
+                            loadedThisFrame = true;
+                            using (PerformanceTrace.Measure(PerformanceArea.WarmupLoad))
+                                candidate.Clip.LoadAudioData();
+                        }
                         if (candidate.Clip.loadState == AudioDataLoadState.Failed)
                         {
                             candidate.Attempts = 2;
                             Retry(candidate, "AudioClip load failed");
+                            _pending.RemoveAt(pendingIndex--);
                             continue;
                         }
                         if (candidate.Clip.loadState != AudioDataLoadState.Loaded) continue;
@@ -235,19 +284,38 @@ namespace GunsAreLoud.Client.Audio
                 if (worker == null) _workers[index] = worker = new Worker(transform, index);
                 worker.Start(next, _rate);
             }
-            foreach (Recipe recipe in _recipes)
+            bool composedThisFrame = false;
+            for (int recipeIndex = _recipes.Count - 1; recipeIndex >= 0; recipeIndex--)
             {
-                if (recipe.Published || !recipe.Body.Ready || !recipe.Tail.Ready) continue;
-                float[] pcm = AutomaticReportPcm.Compose(recipe.Body.Buffer.Samples,
-                    recipe.Tail.Buffer.Samples, recipe.TailGain, (int)(_rate * 0.002f));
-                AutomaticBeatClipCache.PublishReport(recipe.Body.Clip, recipe.Tail.Clip, _rate, pcm);
-                LowEndNormalizationCache.Register(recipe.Body.Clip, _rate, pcm,
-                    recipe.Body.ReferenceVolume, recipe.Body.Group,
-                    recipe.Body.Frames / (float)_rate);
+                Recipe recipe = _recipes[recipeIndex];
+                if (Failed(recipe.Body) || Failed(recipe.Tail))
+                {
+                    ReleaseRecipe(recipe);
+                    _recipes.RemoveAt(recipeIndex);
+                    continue;
+                }
+                if (!recipe.Body.Ready || !recipe.Tail.Ready) continue;
+                // Composing and publishing a report is the heaviest single step of
+                // a weapon swap. One per frame: the next ready recipe waits for the
+                // next Tick rather than stacking several megabyte copies together.
+                if (composedThisFrame) break;
+                composedThisFrame = true;
+                float[] pcm;
+                using (PerformanceTrace.Measure(PerformanceArea.WarmupCompose))
+                    pcm = AutomaticReportPcm.Compose(recipe.Body.Buffer.Samples,
+                        recipe.Tail.Buffer.Samples, recipe.TailGain, (int)(_rate * 0.002f));
+                using (PerformanceTrace.Measure(PerformanceArea.WarmupPublish))
+                    AutomaticCopyCache.PublishFullReport(recipe.Body.Clip, recipe.Tail.Clip, _rate, pcm);
+                using (PerformanceTrace.Measure(PerformanceArea.WarmupRegister))
+                    LowEndNormalizationCache.Register(recipe.Body.Clip, _rate, pcm,
+                        recipe.Body.ReferenceVolume, recipe.Body.Group,
+                        recipe.Body.Frames / (float)_rate);
                 // A release tail must inherit its body's correction, not have
                 // its quiet decay independently boosted to a full attack level.
                 LowEndNormalizationCache.Alias(recipe.Tail.Clip, recipe.Body.Clip);
-                recipe.Published = AutomaticBeatClipCache.TryGetReport(recipe.Body.Clip, _rate, out _);
+                if (!AutomaticCopyCache.TryGetFullReport(recipe.Body.Clip, _rate, out _)) continue;
+                ReleaseRecipe(recipe);
+                _recipes.RemoveAt(recipeIndex);
             }
         }
 
@@ -263,7 +331,7 @@ namespace GunsAreLoud.Client.Audio
                 for (int index = 0; index < bodies.Length; index++)
                 {
                     AudioClip clip = bodies[index];
-                    if (clip == null || AutomaticBeatClipCache.TryGetReport(clip, _rate, out _) ||
+                    if (clip == null || AutomaticCopyCache.TryGetFullReport(clip, _rate, out _) ||
                         !_plannedBodies.Add(clip.GetInstanceID())) continue;
                     float beat = body.ClipLength > 0f ? body.ClipLength / 16f : clip.length / 16f;
                     Job bodyJob = AddJob(clip, Math.Max(1, (int)(beat * _rate)), true,
@@ -273,11 +341,16 @@ namespace GunsAreLoud.Client.Audio
                     {
                         Job tailJob = AddJob(tailClip, Math.Max(1, Mathf.RoundToInt(tailClip.length * _rate)), false,
                             group: environment * 2 + (suppressed ? 1 : 0));
+                        bodyJob.RecipeConsumers++;
+                        tailJob.RecipeConsumers++;
                         _recipes.Add(new Recipe { Body = bodyJob, Tail = tailJob,
                             TailGain = tail.BaseVolume / Mathf.Max(0.001f, body.BaseVolume) });
                     }
-                    if (Plugin.ModConfig?.DiagnosticShotLog.Value == true)
-                        Plugin.Log.LogInfo($"automatic prewarm queued body={clip.name} tail={tailClip?.name ?? "none"}");
+                    if (DetailedDiagnostics.TryBegin(
+                        DiagnosticEventKind.AutomaticWarmup, out DiagnosticReservation reservation))
+                        DetailedDiagnostics.Commit(
+                            reservation,
+                            $"automatic prewarm queued body={clip.name} tail={tailClip?.name ?? "none"}");
                 }
             }
         }
@@ -314,7 +387,7 @@ namespace GunsAreLoud.Client.Audio
         private Job AddJob(AudioClip clip, int frames, bool body,
             bool normalize = false, float referenceVolume = 1f, int group = 0)
         {
-            string key = $"{clip.GetInstanceID()}:{frames}";
+            var key = new JobKey(clip.GetInstanceID(), frames);
             if (_jobs.TryGetValue(key, out Job existing)) return existing;
             var job = new Job { Clip = clip, Frames = frames, Body = body,
                 Normalize = normalize, ReferenceVolume = referenceVolume, Group = group };
@@ -323,9 +396,59 @@ namespace GunsAreLoud.Client.Audio
             return job;
         }
 
+        // Keeps exactly the jobs that are still usable as they stand: decoded, with
+        // their buffer, ready to be composed when the same weapon comes back.
+        // Everything else is dropped, so nothing can later compose from a buffer
+        // this released.
+        private readonly List<JobKey> _staleJobs = new List<JobKey>();
+
+        private void ReleaseUnfinishedJobs()
+        {
+            _staleJobs.Clear();
+            foreach (KeyValuePair<JobKey, Job> pair in _jobs)
+            {
+                Job job = pair.Value;
+                job.Running = false;
+                job.RecipeConsumers = 0;
+                if (job.Ready && job.Buffer != null && job.Clip != null) continue;
+                job.Buffer = null;
+                _staleJobs.Add(pair.Key);
+            }
+            foreach (JobKey key in _staleJobs) _jobs.Remove(key);
+            _staleJobs.Clear();
+        }
+
+        private void CompleteJob(Job job)
+        {
+            _pending.Remove(job);
+            if (!job.Ready || job.RecipeConsumers == 0) job.Buffer = null;
+        }
+
+        private static bool Failed(Job job) =>
+            job == null || job.Clip == null || (!job.Ready && job.Attempts >= 2);
+
+        private static void ReleaseRecipe(Recipe recipe)
+        {
+            ReleaseRecipeJob(recipe.Body);
+            ReleaseRecipeJob(recipe.Tail);
+            recipe.Body = null;
+            recipe.Tail = null;
+        }
+
+        private static void ReleaseRecipeJob(Job job)
+        {
+            if (job == null) return;
+            job.RecipeConsumers = Math.Max(0, job.RecipeConsumers - 1);
+            if (job.RecipeConsumers == 0 && !job.Running) job.Buffer = null;
+        }
+
         private static void Retry(Job job, string reason)
         {
-            Plugin.Log.LogWarning($"automatic prewarm clip={job.Clip?.name} attempt={job.Attempts}/2: {reason}");
+            if (DetailedDiagnostics.TryBegin(
+                DiagnosticEventKind.AutomaticWarmup, out DiagnosticReservation reservation))
+                DetailedDiagnostics.Commit(
+                    reservation,
+                    $"automatic prewarm clip={job.Clip?.name} attempt={job.Attempts}/2: {reason}");
         }
 
         private void StopWorkers()
@@ -337,7 +460,9 @@ namespace GunsAreLoud.Client.Audio
         {
             StopWorkers();
             // Release raw scratch PCM; immutable published clips remain reusable.
-            _jobs.Clear();
+            // A job that is already decoded keeps its buffer: a weapon swap back
+            // and forth used to throw away finished work and decode it again.
+            ReleaseUnfinishedJobs();
             _pending.Clear();
             _recipes.Clear();
             _plannedBodies.Clear();
@@ -350,7 +475,25 @@ namespace GunsAreLoud.Client.Audio
             internal Job Body;
             internal Job Tail;
             internal float TailGain;
-            internal bool Published;
+        }
+
+        private readonly struct JobKey : IEquatable<JobKey>
+        {
+            private readonly int _clip;
+            private readonly int _frames;
+
+            internal JobKey(int clip, int frames)
+            {
+                _clip = clip;
+                _frames = frames;
+            }
+
+            public bool Equals(JobKey other) =>
+                _clip == other._clip && _frames == other._frames;
+            public override bool Equals(object obj) =>
+                obj is JobKey other && Equals(other);
+            public override int GetHashCode() =>
+                unchecked((_clip * 397) ^ _frames);
         }
 
         private sealed class Job
@@ -365,6 +508,7 @@ namespace GunsAreLoud.Client.Audio
             internal bool Running;
             internal int Attempts;
             internal SilentPcmBuffer Buffer;
+            internal int RecipeConsumers;
         }
 
         private sealed class Worker
@@ -415,6 +559,7 @@ namespace GunsAreLoud.Client.Audio
                 if (Job != null)
                 {
                     Job.Running = false;
+                    if (cancelled) Job.Buffer = null;
                     if (cancelled && !Job.Ready) Job.Attempts = Math.Max(0, Job.Attempts - 1);
                 }
                 Job = null;
@@ -439,6 +584,7 @@ namespace GunsAreLoud.Client.Audio
         private WeaponSoundPlayer _attached;
         private void Update()
         {
+            AutomaticWeaponWarmup.ReleaseCachesIfIdle();
             if (Plugin.ModConfig?.Enabled.Value != true) { _attached = null; return; }
             WeaponSoundPlayer weapon = AudioRuntimeLookup.HeldWeapon;
             if (weapon == null) { _attached = null; return; }

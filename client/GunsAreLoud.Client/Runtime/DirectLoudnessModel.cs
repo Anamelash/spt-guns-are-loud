@@ -13,6 +13,7 @@ namespace GunsAreLoud.Client.Runtime
         internal float DirectBodyGain;
         internal LocalGunshotAudioTuning AudioTuning;
         internal int TunedAudioSamples;
+        internal DiagnosticShotToken DiagnosticShot;
     }
 
     internal static class DirectLoudnessModel

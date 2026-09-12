@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using BepInEx.Configuration;
 using GunsAreLoud.Client.Configuration;
@@ -183,6 +184,7 @@ namespace GunsAreLoud.Client.Audio
     {
         private sealed class Source
         {
+            internal int Id;
             internal float[] Pcm;
             internal int Rate, Group;
             internal float Volume;
@@ -191,13 +193,24 @@ namespace GunsAreLoud.Client.Audio
             internal bool DecayReady;
             internal float NativeBodySeconds;
             internal int Revision = -1;
+            internal bool Queued;
         }
+
+        // Analysis PCM is only needed to re-measure after an F12 band change.
+        // A long raid with many banks would otherwise keep every prefix alive:
+        // the oldest measured ones are released and simply stop re-measuring.
+        internal const long MaximumRetainedSamples = 6L * 1024L * 1024L;
 
         private static readonly Dictionary<int, Source> Sources = new Dictionary<int, Source>();
         private static readonly Dictionary<int, int> Aliases = new Dictionary<int, int>();
+        private static readonly Queue<Source> Pending = new Queue<Source>();
+        private static readonly List<Source> Retained = new List<Source>();
+        private static long _retainedSamples;
         private static float _pitch, _high, _low;
         private static int _revision;
         internal static int SourceCount => Sources.Count;
+        internal static int PendingCount => Pending.Count;
+        internal static long RetainedSamples => _retainedSamples;
         internal static int MeasurementCount { get; private set; }
 
         internal static bool Contains(AudioClip clip) => clip != null && Sources.ContainsKey(clip.GetInstanceID());
@@ -218,8 +231,33 @@ namespace GunsAreLoud.Client.Audio
             int samples = Math.Min(pcm.Length & ~1, (int)(rate * 1.25f) * 2);
             var prefix = new float[samples];
             Array.Copy(pcm, prefix, samples);
-            Sources[id] = new Source { Pcm = prefix, Rate = rate, Volume = volume, Group = group,
+            var source = new Source { Id = id, Pcm = prefix, Rate = rate, Volume = volume, Group = group,
                 NativeBodySeconds = Math.Max(0f, nativeBodySeconds) };
+            if (Sources.TryGetValue(id, out Source replaced)) ReleasePcm(replaced);
+            Sources[id] = source;
+            Retained.Add(source);
+            _retainedSamples += prefix.Length;
+            TrimRetention();
+            Queue(source);
+        }
+
+        private static void ReleasePcm(Source source)
+        {
+            if (source?.Pcm == null) return;
+            _retainedSamples -= source.Pcm.Length;
+            source.Pcm = null;
+        }
+
+        private static void TrimRetention()
+        {
+            while (Retained.Count > 1 && _retainedSamples > MaximumRetainedSamples)
+            {
+                Source oldest = Retained[0];
+                // Never release a prefix that has not produced its measurement yet.
+                if (oldest.Pcm != null && oldest.Revision != _revision) break;
+                Retained.RemoveAt(0);
+                ReleasePcm(oldest);
+            }
         }
 
         internal static void Alias(AudioClip clip, AudioClip body)
@@ -234,14 +272,31 @@ namespace GunsAreLoud.Client.Audio
         {
             if (tuning == null) return;
             SetBand(tuning.PitchedLayerSemitones, tuning.PitchedLayerHighpassHz, tuning.PitchedLayerLowpassHz);
-            // Budget the background work. Never decode or scan all weapon banks
-            // in FireBullet; missing measurements use neutral correction, not old F12.
-            int budget = 4;
-            foreach (Source source in Sources.Values)
+            // Only changed/new entries are queued. One measurement is indivisible,
+            // so the budget is checked after every one of them: a frame pays for
+            // at most one measurement plus whatever fits in a millisecond. A band
+            // change re-queues every source, and that used to cost four of them in
+            // one frame whatever they were worth.
+            const int minimumMeasurements = 1;
+            const int maximumMeasurements = 8;
+            const double timeBudgetMilliseconds = 1.0;
+            long start = Stopwatch.GetTimestamp();
+            int measured = 0;
+            while (Pending.Count > 0 && measured < maximumMeasurements)
             {
-                if (source.Revision == _revision) continue;
+                Source source = Pending.Dequeue();
+                source.Queued = false;
+                if (!Sources.TryGetValue(source.Id, out Source current) ||
+                    !ReferenceEquals(current, source) ||
+                    source.Pcm == null ||
+                    source.Revision == _revision)
+                    continue;
                 Measure(source);
-                if (--budget == 0) break;
+                measured++;
+                if (measured >= minimumMeasurements &&
+                    (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency >=
+                    timeBudgetMilliseconds)
+                    break;
             }
         }
 
@@ -252,10 +307,23 @@ namespace GunsAreLoud.Client.Audio
             if (_pitch == pitch && _high == high && _low == low) return;
             _pitch = pitch; _high = high; _low = low;
             _revision++;
+            foreach (Source source in Sources.Values) Queue(source);
+        }
+
+        private static void Queue(Source source)
+        {
+            // A released prefix keeps the measurement it already published; it
+            // simply cannot be re-measured for a new band and falls back to
+            // neutral correction, exactly like a clip that was never warmed.
+            if (source == null || source.Queued || source.Pcm == null ||
+                source.Revision == _revision) return;
+            source.Queued = true;
+            Pending.Enqueue(source);
         }
 
         private static void Measure(Source source)
         {
+            if (source.Pcm == null) return;
             float playbackDecayStart = source.NativeBodySeconds > 0f
                 ? Math.Max(LowEndLevelModel.WindowSeconds, source.NativeBodySeconds / Math.Max(0.1f, _pitch))
                 : LowEndLevelModel.WindowSeconds;
@@ -329,7 +397,8 @@ namespace GunsAreLoud.Client.Audio
 
         internal static void Clear()
         {
-            Sources.Clear(); Aliases.Clear();
+            Sources.Clear(); Aliases.Clear(); Pending.Clear(); Retained.Clear();
+            _retainedSamples = 0;
             _revision++;
             MeasurementCount = 0;
         }

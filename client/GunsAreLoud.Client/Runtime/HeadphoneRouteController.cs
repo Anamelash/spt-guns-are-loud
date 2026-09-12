@@ -41,7 +41,7 @@ namespace GunsAreLoud.Client.Runtime
 
     internal interface IHeadphoneRouteBackend
     {
-        bool TryActivate(HeadsetProfile profile, out string reason);
+        bool TryActivate(HeadsetProfile profile, HeadsetSendLevels sends, out string reason);
         bool TryRestore(out string reason);
     }
 
@@ -53,6 +53,9 @@ namespace GunsAreLoud.Client.Runtime
         private readonly IHeadphoneRouteBackend _backend;
         private HeadphoneRouteStatus _status;
         private string _activeProfileId = "";
+        // Only consulted while the route is Realistic, which it becomes only by
+        // a successful activation with exactly these levels.
+        private HeadsetSendLevels _activeSends;
         private int _generation;
 
         internal HeadphoneRouteController(IHeadphoneRouteBackend backend)
@@ -64,7 +67,8 @@ namespace GunsAreLoud.Client.Runtime
 
         internal HeadphoneRouteStatus Status => _status;
 
-        internal bool Apply(HeadphoneMode requested, string templateId, bool force = false)
+        internal bool Apply(HeadphoneMode requested, string templateId, bool force = false,
+            HeadsetSendLevels sends = default)
         {
             templateId = templateId ?? "";
             if (requested == HeadphoneMode.Vanilla)
@@ -82,15 +86,19 @@ namespace GunsAreLoud.Client.Runtime
                 return Fallback(requested, templateId, profile.ProfileId,
                     HeadphoneRouteFallback.MixerUnavailable, "realistic mixer backend unavailable");
 
+            // Variants of one headset share a profile but not always a category mix,
+            // so a changed send level must reactivate even when the profile is the same.
             if (!force && _status.Effective == HeadphoneMode.Realistic &&
-                string.Equals(_activeProfileId, profile.ProfileId, StringComparison.Ordinal))
+                string.Equals(_activeProfileId, profile.ProfileId, StringComparison.Ordinal) &&
+                _activeSends.Equals(sends))
             {
                 _status = NewStatus(requested, HeadphoneMode.Realistic, templateId,
                     profile.ProfileId, HeadphoneRouteFallback.None, "complete two-path route active");
                 return true;
             }
 
-            if (!_backend.TryActivate(profile, out string reason))
+            _activeSends = sends;
+            if (!_backend.TryActivate(profile, sends, out string reason))
             {
                 if (string.Equals(reason, "profile-fit-pending", StringComparison.Ordinal))
                     return Fallback(requested, templateId, profile.ProfileId,

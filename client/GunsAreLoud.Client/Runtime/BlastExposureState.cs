@@ -22,6 +22,19 @@ namespace GunsAreLoud.Client.Runtime
             double exposure = (indoor ? ratio : ratio * ratio) * Math.Pow(10, -Math.Max(0, protectionDb) / 10);
             return (float)Math.Min(1, Math.Max(0, exposure));
         }
+        // Ringing at 100% explosion strength is anchored to the loudest ringing
+        // gunfire can reach with the current settings. A fixed level let two
+        // unprotected rifle shots ring louder than a close blast, so firing during
+        // the blast tinnitus raised it instead of being masked by it. The former
+        // 0.02 cap never bound inside the 0..200% slider range and is not kept.
+        internal const float BaseRingLevel = .008f;
+        internal static float RingLevel(float envelope, float strengthPercent, float gunshotTinnitusCeiling)
+        {
+            float peak = Math.Max(BaseRingLevel, Finite(gunshotTinnitusCeiling));
+            float strength = Math.Min(2f, Math.Max(0f, Finite(strengthPercent) / 100f));
+            return Math.Min(1f, Math.Max(0f, Finite(envelope))) * peak * strength;
+        }
+        private static float Finite(float value) => float.IsNaN(value) || float.IsInfinity(value) ? 0f : value;
         internal void Add(float start, float severity, float hearingSeconds, float ringingSeconds, float severeSeconds, float attackSeconds = 0f)
         {
             if (!(severity > .001f)) return;

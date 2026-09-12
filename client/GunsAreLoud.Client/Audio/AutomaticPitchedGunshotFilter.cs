@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using GunsAreLoud.Client.Configuration;
+using GunsAreLoud.Client.Runtime;
 using UnityEngine;
 
 namespace GunsAreLoud.Client.Audio
@@ -65,7 +66,11 @@ namespace GunsAreLoud.Client.Audio
         private const float PreRollSeconds = 0.006f;
         private const float MaximumArmSeconds = 0.25f;
 
-        private readonly float[] _ring = new float[RingFrameCapacity * MaximumChannels];
+        // Two mebibytes. Only the diagnostic built-in DSP route ever fills it, so
+        // it is allocated when that route is first configured on this source and
+        // released when the component is switched off, instead of being attached
+        // to every pooled EFT source that ever played one of our shots.
+        private volatile float[] _ring;
         private readonly DspVoice[] _voices =
         {
             new DspVoice(),
@@ -103,6 +108,9 @@ namespace GunsAreLoud.Client.Audio
         private int _triggerCount;
         private int _onsetCount;
         private int _activeVoiceCount;
+        // A bypassed filter on a pooled source only
+        // ever sees another sound's buffers.
+        private volatile bool _foreignPlayback = true;
         private volatile float _inputPeak;
         private volatile float _addedPeak;
 
@@ -117,6 +125,7 @@ namespace GunsAreLoud.Client.Audio
             int sampleRate,
             float headphoneTailDbPerSecond = 0f)
         {
+            _foreignPlayback = false;
             int rate = Mathf.Max(8000, sampleRate);
             float ratio = Mathf.Clamp(pitchRatio, 0.25f, 0.95f);
             float upper = Mathf.Clamp(lowpassHz, 80f, rate * 0.45f);
@@ -127,8 +136,8 @@ namespace GunsAreLoud.Client.Audio
             _route = route;
             _sampleRate = rate;
             _pitchRatio = ratio;
-            _highpassCoefficient = LocalGunshotImpactFilter.CalculateLowpassCoefficient(rate, lower);
-            _lowpassCoefficient = LocalGunshotImpactFilter.CalculateLowpassCoefficient(rate, upper);
+            _highpassCoefficient = LowBandCoefficients.Lowpass(rate, lower);
+            _lowpassCoefficient = LowBandCoefficients.Lowpass(rate, upper);
             _sourceSpanSeconds = sourceSpan;
             _durationSeconds = PitchedGunshotLayer.CalculatePitchedDuration(
                 sourceSpan,
@@ -136,6 +145,7 @@ namespace GunsAreLoud.Client.Audio
             _fadePercent = Mathf.Clamp(fadePercent, 5f, 100f);
             _gain = Mathf.Clamp(gain, 0f, 31.62278f);
             _headphoneTailDbPerSecond = headphoneTailDbPerSecond;
+            if (_ring == null) _ring = new float[RingFrameCapacity * MaximumChannels];
 
             if (!_processingEnabled || routeChanged)
             {
@@ -163,6 +173,7 @@ namespace GunsAreLoud.Client.Audio
 
         internal void Bypass()
         {
+            _foreignPlayback = true;
             _processingEnabled = false;
             Interlocked.Exchange(ref _pendingTriggers, 0);
             Interlocked.Increment(ref _generation);
@@ -207,15 +218,34 @@ namespace GunsAreLoud.Client.Audio
                 Mathf.Max(0, outputFrames);
         }
 
+        private void Awake() => GalSourceCensus.Created(GalComponentKind.AutomaticPitched);
+
+        private void OnEnable() => GalSourceCensus.Enabled(GalComponentKind.AutomaticPitched);
+
         private void OnDisable()
         {
+            GalSourceCensus.Disabled(GalComponentKind.AutomaticPitched);
             Bypass();
+            // Bypass has already stopped the callback from using it; a filter that
+            // is switched off must not hold two mebibytes for the rest of the raid.
+            _ring = null;
         }
+
+        private void OnDestroy() => GalSourceCensus.Destroyed(GalComponentKind.AutomaticPitched);
 
         private void OnAudioFilterRead(float[] data, int channels)
         {
-            if (!_processingEnabled || data == null || channels <= 0)
+            long trace = AudioFilterTrace.Begin();
+            float[] ring = _ring;
+            if (!_processingEnabled || ring == null || data == null || channels <= 0)
             {
+                AudioFilterTrace.Record(
+                    AudioFilterKind.AutomaticPitched,
+                    trace,
+                    data == null ? 0 : data.Length,
+                    channels,
+                    idle: true,
+                    foreign: _foreignPlayback);
                 return;
             }
 
@@ -248,7 +278,7 @@ namespace GunsAreLoud.Client.Audio
                 float inputPeak = FramePeak(data, frameOffset, channels);
                 callbackInputPeak = Mathf.Max(callbackInputPeak, inputPeak);
 
-                WriteInputFrame(data, frameOffset, channels, stateChannels);
+                WriteInputFrame(ring, data, frameOffset, channels, stateChannels);
 
                 float previousEnvelope = _detectorEnvelope;
                 if (Volatile.Read(ref _pendingTriggers) > 0 &&
@@ -278,6 +308,7 @@ namespace GunsAreLoud.Client.Audio
                 callbackAddedPeak = Mathf.Max(
                     callbackAddedPeak,
                     RenderVoicesAtFrame(
+                        ring,
                         data,
                         frameOffset,
                         channels,
@@ -290,9 +321,13 @@ namespace GunsAreLoud.Client.Audio
             _inputPeak = Mathf.Max(_inputPeak, callbackInputPeak);
             _addedPeak = Mathf.Max(_addedPeak, callbackAddedPeak);
             Volatile.Write(ref _activeVoiceCount, CountActiveVoices());
+            AudioFilterTrace.Record(
+                AudioFilterKind.AutomaticPitched, trace, data.Length, channels,
+                foreign: _foreignPlayback);
         }
 
         private float RenderVoicesAtFrame(
+            float[] ring,
             float[] data,
             int frameOffset,
             int channels,
@@ -325,6 +360,7 @@ namespace GunsAreLoud.Client.Audio
                     int stateChannel = channel % stateChannels;
                     int sampleIndex = frameOffset + channel;
                     float sourceSample = ReadRingInterpolated(
+                        ring,
                         voice.SourcePosition,
                         stateChannel,
                         availableExclusive);
@@ -396,6 +432,7 @@ namespace GunsAreLoud.Client.Audio
         }
 
         private void WriteInputFrame(
+            float[] ring,
             float[] data,
             int frameOffset,
             int channels,
@@ -404,24 +441,25 @@ namespace GunsAreLoud.Client.Audio
             int ringFrame = PositiveModulo(_absoluteFrame, RingFrameCapacity);
             for (int channel = 0; channel < stateChannels; channel++)
             {
-                _ring[ringFrame * MaximumChannels + channel] =
+                ring[ringFrame * MaximumChannels + channel] =
                     data[frameOffset + (channel % channels)];
             }
         }
 
         private float ReadRingInterpolated(
+            float[] ring,
             double absolutePosition,
             int channel,
             long availableExclusive)
         {
             long firstFrame = (long)Math.Floor(absolutePosition);
             float fraction = (float)(absolutePosition - firstFrame);
-            float first = ReadRing(firstFrame, channel, availableExclusive);
-            float second = ReadRing(firstFrame + 1, channel, availableExclusive);
+            float first = ReadRing(ring, firstFrame, channel, availableExclusive);
+            float second = ReadRing(ring, firstFrame + 1, channel, availableExclusive);
             return Mathf.Lerp(first, second, fraction);
         }
 
-        private float ReadRing(long absoluteFrame, int channel, long availableExclusive)
+        private float ReadRing(float[] ring, long absoluteFrame, int channel, long availableExclusive)
         {
             if (absoluteFrame < 0 ||
                 absoluteFrame >= availableExclusive ||
@@ -431,12 +469,13 @@ namespace GunsAreLoud.Client.Audio
             }
 
             int ringFrame = PositiveModulo(absoluteFrame, RingFrameCapacity);
-            return _ring[ringFrame * MaximumChannels + (channel % MaximumChannels)];
+            return ring[ringFrame * MaximumChannels + (channel % MaximumChannels)];
         }
 
         private void ResetAudioState()
         {
-            Array.Clear(_ring, 0, _ring.Length);
+            float[] ring = _ring;
+            if (ring != null) Array.Clear(ring, 0, ring.Length);
             for (int index = 0; index < _voices.Length; index++)
             {
                 _voices[index].Active = false;

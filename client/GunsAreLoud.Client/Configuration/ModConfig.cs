@@ -2,6 +2,7 @@ using BepInEx.Configuration;
 using UnityEngine;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 
 namespace GunsAreLoud.Client.Configuration
 {
@@ -33,12 +34,6 @@ namespace GunsAreLoud.Client.Configuration
     {
         Vanilla,
         Realistic
-    }
-
-    internal enum GunshotLowEndMode
-    {
-        OriginalBand,
-        PitchedCopy
     }
 
     internal enum PitchedLayerOcclusionMode
@@ -97,7 +92,6 @@ namespace GunsAreLoud.Client.Configuration
         internal float TinnitusDurationScale;
         internal float HeadphonesFitOffsetDb;
         internal HeadphoneMode HeadphoneMode;
-        internal float IndoorHeadphonesDampingPercent;
         internal float DefaultHeadphonesProtectionDb;
         internal float MinimumHeadphonesProtectionDb;
         internal float MaximumHeadphonesProtectionDb;
@@ -110,9 +104,10 @@ namespace GunsAreLoud.Client.Configuration
         internal float IndoorDirectBoostDb;
         internal float MaximumDirectBoostDb;
         internal float DirectBodyGain;
-        internal GunshotLowEndMode LowEndMode;
         internal AutomaticPitchedRoute AutomaticPitchedRoute;
         internal AutomaticTailMode AutomaticTailMode;
+        internal float AutomaticReportOverlapShots;
+        internal float AutomaticLateToleranceScale;
         internal float PitchedLayerSemitones;
         internal float PitchedLayerHighpassHz;
         internal float PitchedLayerLowpassHz;
@@ -134,19 +129,22 @@ namespace GunsAreLoud.Client.Configuration
         internal readonly ConfigFile Source;
         internal readonly ConfigEntry<bool> Enabled;
         internal readonly ConfigEntry<LoudnessPreset> Preset;
+        internal readonly ConfigEntry<bool> HearingLossEnabled;
+        internal readonly ConfigEntry<bool> RingingEnabled;
         internal readonly ConfigEntry<float> ShotImpact;
         internal readonly ConfigEntry<float> GunshotContrastDb;
-        internal readonly ConfigEntry<GunshotLowEndMode> LowEndMode;
         internal readonly ConfigEntry<AutomaticPitchedRoute> AutomaticPitchedRoute;
         internal readonly ConfigEntry<AutomaticTailMode> AutomaticTailMode;
+        internal readonly ConfigEntry<float> AutomaticReportOverlapShots;
+        internal readonly ConfigEntry<float> AutomaticLateTolerancePercent;
         internal readonly ConfigEntry<float> PitchedLayerSemitones;
         internal readonly ConfigEntry<float> PitchedLayerHighpassHz;
         internal readonly ConfigEntry<float> PitchedLayerLowpassHz;
         internal readonly ConfigEntry<float> PitchedLayerFadePercent;
         internal readonly ConfigEntry<float> AutomaticPitchedTailMs;
         internal readonly ConfigEntry<float> PitchedLayerGainDb;
-        internal readonly ConfigEntry<float> LowEndNormalizationPercent;
-        internal readonly ConfigEntry<float> CaliberContrastPercent;
+        internal readonly ConfigEntry<float> LowEndNormalizationDb;
+        internal readonly ConfigEntry<float> CartridgeContrastDb;
         internal readonly ConfigEntry<PitchedLayerOcclusionMode> PitchedLayerOcclusion;
         internal readonly ConfigEntry<float> PitchedLayerOccludedLowpassHz;
         internal readonly ConfigEntry<float> IndoorEmphasis;
@@ -156,11 +154,22 @@ namespace GunsAreLoud.Client.Configuration
         internal readonly ConfigEntry<float> EarDifference;
         internal readonly ConfigEntry<HeadphonesFitPreset> HeadphonesFit;
         internal readonly ConfigEntry<HeadphoneMode> HeadphoneMode;
-        internal readonly ConfigEntry<float> IndoorHeadphonesDampingPercent;
+        internal readonly ConfigEntry<bool> PerformanceSummaryLog;
         internal readonly ConfigEntry<bool> DiagnosticShotLog;
 
         internal readonly ConfigEntry<float> BlastHearingStrength, BlastRingingStrength, BlastHearingDuration,
             BlastRingingDuration, BlastSevereDuration, BlastRadius, BlastIndoorScale;
+        private TuningSnapshot _publishedTuning;
+
+        /// <summary>
+        /// Whether muffling can happen at all: the General toggle and the detailed
+        /// intensity have to agree, and either alone switches the effect off.
+        /// </summary>
+        internal bool HearingLossActive =>
+            HearingLossEnabled.Value && IsResponseEnabled(NormalizeResponseControl(HearingTrauma.Value));
+
+        internal bool RingingActive =>
+            RingingEnabled.Value && IsResponseEnabled(NormalizeResponseControl(Ringing.Value));
 
         private static ConfigEntry<float> BlastSetting(ConfigFile config, string name, float value, float min, float max, string description) =>
             Bind(config, "03. Explosions", name, value, new ConfigDescription(description, new AcceptableValueRange<float>(min, max)));
@@ -203,19 +212,13 @@ namespace GunsAreLoud.Client.Configuration
                     "Music, UI, voice chat, and EFT's headset processing are not changed by this control.",
                     new AcceptableValueRange<float>(0f, 18f)));
 
-            LowEndMode = Bind(config,
-                "04. Low-level & debug",
-                "Low-End Method",
-                GunshotLowEndMode.PitchedCopy,
-                Advanced(
-                    "OriginalBand reinforces a short low-frequency band inside the live EFT report. PitchedCopy adds a synchronized, pitch-shifted and band-limited copy of EFT's own recording."));
-
             AutomaticPitchedRoute = Bind(config,
                 "04. Low-level & debug",
                 "Automatic Weapon Route",
                 Configuration.AutomaticPitchedRoute.CachedReport,
                 Advanced(
-                    "CachedReport prepares one authored body interval plus its recorded tail when the weapon is equipped, then plays it through EFT's Gunshots mixer. BuiltInDSP is a diagnostic comparison path inside the live automatic source."));
+                    "CachedReport is the supported route: when the weapon is equipped it prepares one authored body interval plus its recorded tail, then plays each round through EFT's Gunshots mixer, with the calibrated level correction applied. " +
+                    "BuiltInDSP is the legacy route, kept for comparison only. It costs less because it adds the low end inside the weapon's own audio callback instead of playing a copy, but it has its own filter response rather than the original recording's, gives no recorded tail per round, reserves 2 MiB per source, and level correction between weapons is switched off for it."));
 
             AutomaticTailMode = Bind(config,
                 "04. Low-level & debug",
@@ -224,32 +227,63 @@ namespace GunsAreLoud.Client.Configuration
                 Advanced(
                     "FullReportPerShot gives every bullet its processed body and recorded tail, including the first shot of a burst. TailAfterBurst uses a short body with optional synthetic decay and plays the recorded tail only when the trigger is released. Applies to CachedReport."));
 
+            AutomaticReportOverlapShots = Bind(config,
+                "04. Low-level & debug",
+                "Automatic Report Overlap, shots",
+                6f,
+                new ConfigDescription(
+                    "How many rounds of automatic fire one per-bullet report copy may still be sounding over. " +
+                    "A pitched-down full report lasts several seconds, so at a high rate of fire every bullet would " +
+                    "otherwise leave dozens of copies playing at once. When a later round follows, an earlier copy fades " +
+                    "out within this many fire intervals of its own start. A single shot and the last round of a burst " +
+                    "have no successor and keep their full recorded tail. " +
+                    "Higher values restore longer overlap during a burst at a proportional CPU cost.",
+                    new AcceptableValueRange<float>(1f, 32f),
+                    new ConfigurationManagerAttributes { IsAdvanced = true }));
+
+            AutomaticLateTolerancePercent = Bind(config,
+                "04. Low-level & debug",
+                "Late Report Tolerance, %",
+                100f,
+                new ConfigDescription(
+                    "How far behind its own round an added report copy may still be played before it is skipped instead. " +
+                    "100% is one audio buffer or a quarter of the fire interval, whichever is shorter — about 21 ms at a 1024-sample buffer. " +
+                    "Raise it if bursts sound thin on a machine with long frames: more copies are kept, but a kept copy lands further behind its round and can be heard as a double hit. " +
+                    "Lower it for the opposite trade. The performance summary reports the outcome as autoBeats=on time/late/skipped/collapsed/early.",
+                    new AcceptableValueRange<float>(25f, 400f),
+                    new ConfigurationManagerAttributes { IsAdvanced = true }));
+
             PitchedLayerSemitones = Bind(config,
                 "04. Low-level & debug",
                 "Pitch Reduction, semitones",
                 12f,
                 new ConfigDescription(
-                    "Pitch reduction applied to the added copy. 12 semitones is one octave. Applies only to PitchedCopy.",
+                    "Pitch reduction applied to the added copy. 12 semitones is one octave.",
                     new AcceptableValueRange<float>(1f, 24f),
                     new ConfigurationManagerAttributes { IsAdvanced = true }));
 
-            LowEndNormalizationPercent = Bind(config,
-                "04. Low-level & debug", "Low-End Normalization, %", 100f,
+            LowEndNormalizationDb = Bind(config,
+                "04. Low-level & debug", "Low-End Normalization, dB",
+                Converted(config, "Low-End Normalization, %", LowEndNormalizationSpanDb,
+                    0f, 1.5f * LowEndNormalizationSpanDb, LowEndNormalizationSpanDb),
                 new ConfigDescription(
-                    "0% preserves the recorded level differences; 100% applies the calibrated body correction, capped at ±12 dB, before cartridge weighting. " +
-                    "The recorded decay is measured separately and can recover by at most 6 dB relative to an attenuated body, never above its native level. " +
-                    "Values above 100% deliberately exaggerate the body correction, up to ±18 dB at 150%. Pitch and filter changes are included in the measurement; user gain, fade, suppression, and occlusion remain outside it. " +
-                    "Applies to new PitchedCopy voices after analysis is ready; BuiltInDSP is excluded.",
-                    new AcceptableValueRange<float>(0f, 150f),
+                    "How far the calibrated body correction may move one weapon's added low end towards the common target. " +
+                    "0 dB preserves the recorded level differences; 12 dB is the calibrated setting; above it the correction is deliberately exaggerated. " +
+                    "An attenuated body may be cut further than this — twice as far for pistols — and the recorded decay is measured separately and can recover by at most 6 dB relative to an attenuated body, never above its native level. " +
+                    "Pitch and filter changes are included in the measurement; user gain, fade, suppression, and occlusion remain outside it. " +
+                    "Applies to new copies after analysis is ready; BuiltInDSP is excluded.",
+                    new AcceptableValueRange<float>(0f, 1.5f * LowEndNormalizationSpanDb),
                     new ConfigurationManagerAttributes { IsAdvanced = true }));
 
-            CaliberContrastPercent = Bind(config,
-                "04. Low-level & debug", "Cartridge Contrast, %", 200f,
+            CartridgeContrastDb = Bind(config,
+                "04. Low-level & debug", "Cartridge Contrast, dB",
+                Converted(config, "Cartridge Contrast, %", CartridgeContrastSpanDb,
+                    0f, 3f * CartridgeContrastSpanDb, 2f * CartridgeContrastSpanDb),
                 new ConfigDescription(
-                    "Controls the cartridge-family level difference in the added low-end layer, not the complete gunshot. " +
-                    "0% removes the weighting; 100% places an intermediate rifle cartridge about 3 dB above 9×19; 200% gives about 6 dB; 300% gives about 9 dB. " +
+                    "How far apart cartridge families sit in the added low-end layer, not in the complete gunshot. " +
+                    "This is the level of an intermediate rifle cartridge above 9×19: 0 dB removes the weighting, 6 dB is the tuned default, 9 dB is the maximum. " +
                     "Recording differences can still dominate when normalization is partial or limited.",
-                    new AcceptableValueRange<float>(0f, 300f),
+                    new AcceptableValueRange<float>(0f, 3f * CartridgeContrastSpanDb),
                     new ConfigurationManagerAttributes { IsAdvanced = true }));
 
             PitchedLayerLowpassHz = Bind(config,
@@ -257,16 +291,16 @@ namespace GunsAreLoud.Client.Configuration
                 "Upper Cutoff (Low-Pass), Hz",
                 2000f,
                 new ConfigDescription(
-                    "Removes frequencies above this point from PitchedCopy. Lower values sound darker; higher values retain more of the recording's original character.",
+                    "Removes frequencies above this point from the added copy. Lower values sound darker; higher values retain more of the recording's original character.",
                     new AcceptableValueRange<float>(80f, 3000f),
                     new ConfigurationManagerAttributes { IsAdvanced = true }));
 
             PitchedLayerHighpassHz = Bind(config,
                 "04. Low-level & debug",
                 "Lower Cutoff (High-Pass), Hz",
-                10.00001f,
+                10f,
                 new ConfigDescription(
-                    "Removes frequencies below this point from PitchedCopy. Use it to control subsonic energy, rumble, and DC.",
+                    "Removes frequencies below this point from the added copy. Use it to control subsonic energy, rumble, and DC.",
                     new AcceptableValueRange<float>(10f, 300f),
                     new ConfigurationManagerAttributes { IsAdvanced = true }));
 
@@ -293,7 +327,7 @@ namespace GunsAreLoud.Client.Configuration
                 "Copy Gain, dB",
                 20f,
                 new ConfigDescription(
-                    "Additional post-filter gain for PitchedCopy, applied on top of Gunshot Impact. This is a positive-gain control and can reduce headroom at high settings.",
+                    "Additional post-filter gain for the added copy, applied on top of Gunshot Impact. This is a positive-gain control and can reduce headroom at high settings.",
                     new AcceptableValueRange<float>(0f, 30f),
                     new ConfigurationManagerAttributes { IsAdvanced = true }));
 
@@ -307,9 +341,9 @@ namespace GunsAreLoud.Client.Configuration
             PitchedLayerOccludedLowpassHz = Bind(config,
                 "04. Low-level & debug",
                 "Fully Occluded Low-Pass, Hz",
-                500.4695f,
+                500f,
                 new ConfigDescription(
-                    "Upper cutoff approached by PitchedCopy at full EFT occlusion. Applies to Inherit and Enhanced.",
+                    "Upper cutoff approached by the added copy at full EFT occlusion. Applies to Inherit and Enhanced.",
                     new AcceptableValueRange<float>(50f, 1000f),
                     new ConfigurationManagerAttributes { IsAdvanced = true }));
 
@@ -346,6 +380,22 @@ namespace GunsAreLoud.Client.Configuration
                 140f,
                 "Scales the hearing-dose difference between shoulder stances. Rifles expose the muzzle-side ear more strongly; pistols remain nearly symmetrical.");
 
+            HearingLossEnabled = Bind(config,
+                "01. General",
+                "Hearing Loss",
+                true,
+                "Whether your own gunfire and nearby explosions muffle your hearing for a while. " +
+                "Off removes the muffling everywhere without touching ringing, the gunshots themselves, or headset protection. " +
+                "The intensity and recovery of the muffling are set under Gunshots and Explosions.");
+
+            RingingEnabled = Bind(config,
+                "01. General",
+                "Ringing",
+                true,
+                "Whether loud events leave a ringing tone. " +
+                "Off removes the tone everywhere without touching the hearing loss, the gunshots themselves, or headset protection. " +
+                "Its level and duration are set under Gunshots and Explosions.");
+
             HeadphoneMode = Bind(config,
                 "01. General",
                 "Headset Processing",
@@ -363,21 +413,36 @@ namespace GunsAreLoud.Client.Configuration
                 new ConfigDescription("Live native DSP and mixer connection checks. Counters measure processing calls, not perceived sound quality.", null,
                     new ConfigurationManagerAttributes { CustomDrawer = Audio.HeadphoneDiagnostics.Draw, HideDefaultButton = true }));
 
-            // Retain the inactive value through the same migration as visible settings.
-            // Configuration Manager recognizes the tag by reflection and hides it.
-            IndoorHeadphonesDampingPercent = Bind(config,
-                "04. Low-level & debug", "Legacy Indoor Headset Damping", 100f,
-                new ConfigDescription(
-                    "Retained only for old configuration files. It is inactive: Vanilla keeps EFT's original headset path, while Realistic uses one complete physical profile without an extra body, tail, or room adjustment.",
-                    new AcceptableValueRange<float>(0f, 200f),
-                    new ConfigurationManagerAttributes { Browsable = false }));
+            PerformanceSummaryLog = Bind(config,
+                "04. Low-level & debug",
+                "Performance Summary Log",
+                false,
+                Advanced(
+                    "Writes one bounded performance summary every 10 seconds to GunsAreLoud.Diagnostics.log in the mod's own plugin folder. It does not enable per-shot probes."));
 
             DiagnosticShotLog = Bind(config,
                 "04. Low-level & debug",
                 "Log Every Local Shot",
-                true,
+                false,
                 Advanced(
-                    "Writes per-shot caliber, profile, left/right dose, low-end routing, normalization, listener-band, and performance diagnostics to the BepInEx log. Enable only when collecting evidence; it can produce a large log."));
+                    "Writes rate-limited per-shot, routing, normalization, and listener-band diagnostics to GunsAreLoud.Diagnostics.log in the mod's own plugin folder. Enable only while collecting evidence. This switch always resets to off at the next client start."));
+            // Detailed probes are session-scoped. A persisted F12 value from a
+            // previous run must be disabled before any runtime handlers attach.
+            DiagnosticShotLog.Value = false;
+            // Settings that no longer exist. Binding and immediately removing them
+            // is the same move the section migration makes, and it takes the stale
+            // line out of an existing configuration file instead of leaving it to
+            // be read back as an orphan for the rest of the mod's life.
+            Discard<float>(config, "Legacy Indoor Headset Damping",
+                "04. Low-level & debug", "10. Sound and Hearing");
+            Discard<bool>(config, "Disable Components On Other Sounds",
+                "04. Low-level & debug", "90. Diagnostics");
+            Discard<bool>(config, "Soft Output Limiter",
+                "04. Low-level & debug", "90. Diagnostics");
+            // The original-band method and everything that served it are gone;
+            // the pitched copy is the only low-end path now.
+            Discard<string>(config, "Low-End Method",
+                "04. Low-level & debug", "20. Low-End Layer");
             // This manager preserves ConfigFile enumeration order for categories.
             // Reinsert the same entry objects via the supported ICollection interface.
             var ordered = config.OrderBy(pair => pair.Key.Section, System.StringComparer.Ordinal).ToArray();
@@ -385,7 +450,15 @@ namespace GunsAreLoud.Client.Configuration
             foreach (var entry in ordered)
                 ((ICollection<KeyValuePair<ConfigDefinition, ConfigEntryBase>>)config).Add(entry);
 
+            _publishedTuning = BuildTuning();
+            Source.SettingChanged += PublishTuning;
         }
+
+        // A preset or a slider drag raises SettingChanged once per entry, and the
+        // manager writes several entries in the same frame. Invalidate here and
+        // rebuild once, on the next reader, instead of once per entry.
+        private void PublishTuning(object sender, SettingChangedEventArgs args) =>
+            Volatile.Write(ref _publishedTuning, null);
 
         private static ConfigEntry<T> Bind<T>(ConfigFile config, string section, string key, T value, string description) =>
             Bind(config, section, key, value, new ConfigDescription(description));
@@ -395,8 +468,9 @@ namespace GunsAreLoud.Client.Configuration
             string oldSection = section, oldKey = key;
             if (section == "02. Gunshots") oldSection = "10. Sound and Hearing";
             else if (section == "03. Explosions") oldSection = "15. Explosions";
-            else if (section == "04. Low-level & debug") oldSection = key == "Log Every Local Shot" ? "90. Diagnostics" :
-                key == "Legacy Indoor Headset Damping" ? "10. Sound and Hearing" : "20. Low-End Layer";
+            else if (section == "04. Low-level & debug") oldSection =
+                (key == "Log Every Local Shot" || key == "Performance Summary Log")
+                    ? "90. Diagnostics" : "20. Low-End Layer";
             else if (key == "Headset Processing" || key == "Headset Fit") oldSection = "10. Sound and Hearing";
             if (key == "Hearing Loss Intensity, %") oldKey = "Temporary Hearing Loss";
             if (key == "Ringing Intensity, %") oldKey = "Tinnitus";
@@ -417,18 +491,21 @@ namespace GunsAreLoud.Client.Configuration
         private static int SettingOrder(string key)
         {
             string[] keys = {
-                "Enabled", "Preset", "Headset Processing", "Headset Fit", "Headset Diagnostics",
+                "Enabled", "Preset", "Hearing Loss", "Ringing",
+                "Headset Processing", "Headset Fit", "Headset Diagnostics",
                 "Gunshot Impact", "Gunshot Contrast, dB", "Indoor Emphasis",
                 "Hearing Loss Intensity, %", "Hearing Loss Duration, %",
                 "Ringing Intensity, %", "Ringing Duration, %", "Left/Right Ear Difference",
                 "Hearing Loss Strength, %", "Hearing Loss Duration, s",
                 "Ringing Strength, %", "Ringing Duration, s", "Close Blast Hearing Loss Duration, s",
                 "Outdoor Close Blast Radius, m", "Indoor Radius Multiplier",
-                "Low-End Method", "Automatic Weapon Route", "Automatic Report Shape",
+                "Automatic Weapon Route", "Automatic Report Shape",
+                "Automatic Report Overlap, shots", "Late Report Tolerance, %",
                 "Pitch Reduction, semitones", "Lower Cutoff (High-Pass), Hz", "Upper Cutoff (Low-Pass), Hz",
-                "Copy Gain, dB", "Low-End Normalization, %", "Cartridge Contrast, %",
+                "Copy Gain, dB", "Low-End Normalization, dB", "Cartridge Contrast, dB",
                 "Fade-Out Portion, %", "Automatic Fallback Decay, ms", "Copy Occlusion",
-                "Fully Occluded Low-Pass, Hz", "Legacy Indoor Headset Damping", "Log Every Local Shot"
+                "Fully Occluded Low-Pass, Hz",
+                "Performance Summary Log", "Log Every Local Shot"
             };
             int index = System.Array.IndexOf(keys, key);
             return index < 0 ? 0 : 1000 - index; // Installed manager sorts descending.
@@ -436,11 +513,23 @@ namespace GunsAreLoud.Client.Configuration
 
         internal TuningSnapshot GetTuning()
         {
+            TuningSnapshot tuning = Volatile.Read(ref _publishedTuning);
+            if (tuning != null) return tuning;
+            tuning = BuildTuning();
+            Volatile.Write(ref _publishedTuning, tuning);
+            return tuning;
+        }
+
+        private TuningSnapshot BuildTuning()
+        {
             ProfileValues profile = GetProfile(Preset.Value);
             float impact = Mathf.Clamp(ShotImpact.Value / 100f, 0f, 2f);
             float indoor = Mathf.Clamp(IndoorEmphasis.Value / 100f, 0f, 2f);
-            float trauma = NormalizeResponseControl(HearingTrauma.Value);
-            float ringing = NormalizeResponseControl(Ringing.Value);
+            // The General toggles gate the whole effect: with one off, nothing
+            // downstream sees a dose, a target or a duration for it, whatever the
+            // detailed controls say.
+            float trauma = HearingLossEnabled.Value ? NormalizeResponseControl(HearingTrauma.Value) : 0f;
+            float ringing = RingingEnabled.Value ? NormalizeResponseControl(Ringing.Value) : 0f;
             float earDifference = Mathf.Clamp(EarDifference.Value / 100f, 0f, 2f);
 
             return new TuningSnapshot
@@ -480,7 +569,6 @@ namespace GunsAreLoud.Client.Configuration
                 TinnitusDurationScale = RingingDuration.Value / 100f,
                 HeadphonesFitOffsetDb = GetHeadphonesFitOffsetDb(HeadphonesFit.Value),
                 HeadphoneMode = HeadphoneMode.Value,
-                IndoorHeadphonesDampingPercent = IndoorHeadphonesDampingPercent.Value,
                 DefaultHeadphonesProtectionDb = 22f,
                 MinimumHeadphonesProtectionDb = 10f,
                 MaximumHeadphonesProtectionDb = 30f,
@@ -493,9 +581,10 @@ namespace GunsAreLoud.Client.Configuration
                 IndoorDirectBoostDb = profile.IndoorDirectBoostDb * impact * indoor,
                 MaximumDirectBoostDb = 6.5f,
                 DirectBodyGain = Mathf.Clamp(profile.DirectBodyGain * impact, 0f, 0.5f),
-                LowEndMode = this.LowEndMode.Value,
                 AutomaticPitchedRoute = this.AutomaticPitchedRoute.Value,
                 AutomaticTailMode = this.AutomaticTailMode.Value,
+                AutomaticReportOverlapShots = AutomaticReportOverlapShots.Value,
+                AutomaticLateToleranceScale = AutomaticLateTolerancePercent.Value / 100f,
                 PitchedLayerSemitones = PitchedLayerSemitones.Value,
                 PitchedLayerHighpassHz = PitchedLayerHighpassHz.Value,
                 PitchedLayerLowpassHz = PitchedLayerLowpassHz.Value,
@@ -505,8 +594,8 @@ namespace GunsAreLoud.Client.Configuration
                     0f,
                     0.6f),
                 PitchedLayerGainDb = PitchedLayerGainDb.Value,
-                LowEndNormalizationPercent = LowEndNormalizationPercent.Value,
-                CaliberContrastPercent = CaliberContrastPercent.Value,
+                LowEndNormalizationPercent = LowEndNormalizationDb.Value * 100f / LowEndNormalizationSpanDb,
+                CaliberContrastPercent = CartridgeContrastDb.Value * 100f / CartridgeContrastSpanDb,
                 PitchedLayerOcclusion = this.PitchedLayerOcclusion.Value,
                 PitchedLayerOccludedLowpassHz = PitchedLayerOccludedLowpassHz.Value,
                 IndoorRoomStrength = indoor,
@@ -528,6 +617,52 @@ namespace GunsAreLoud.Client.Configuration
                 key,
                 value,
                 new ConfigDescription(description, new AcceptableValueRange<float>(0f, 200f)));
+        }
+
+        /// <summary>
+        /// The decibel span one hundred percent of the old control stood for.
+        /// Both settings were already linear in decibels underneath; the percent
+        /// only hid which decibels they were.
+        /// </summary>
+        internal const float LowEndNormalizationSpanDb = 12f;
+
+        /// <summary>An intermediate rifle cartridge above 9x19, at one hundred percent.</summary>
+        internal const float CartridgeContrastSpanDb = 3f;
+
+        /// <summary>
+        /// The starting value for a control that used to be a percentage: the
+        /// converted setting from an existing configuration file, or the shipped
+        /// default when the file has no such line. The old line is taken out
+        /// either way, so the conversion happens exactly once.
+        /// </summary>
+        private static float Converted(
+            ConfigFile config, string legacyKey, float spanDb,
+            float minimumDb, float maximumDb, float defaultDb)
+        {
+            float percent = float.NaN;
+            foreach (string section in new[] { "04. Low-level & debug", "20. Low-End Layer" })
+            {
+                var definition = new ConfigDefinition(section, legacyKey);
+                ConfigEntry<float> legacy = config.Bind(definition, float.NaN);
+                if (!float.IsNaN(legacy.Value)) percent = legacy.Value;
+                config.Remove(definition);
+            }
+            return float.IsNaN(percent)
+                ? defaultDb
+                : Mathf.Clamp(percent * spanDb / 100f, minimumDb, maximumDb);
+        }
+
+        /// <summary>
+        /// Drops a setting this version no longer has from the configuration file.
+        /// </summary>
+        private static void Discard<T>(ConfigFile config, string key, params string[] sections)
+        {
+            foreach (string section in sections)
+            {
+                var definition = new ConfigDefinition(section, key);
+                config.Bind(definition, default(T));
+                config.Remove(definition);
+            }
         }
 
         private static ConfigDescription Advanced(string description)

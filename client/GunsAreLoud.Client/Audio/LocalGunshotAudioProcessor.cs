@@ -20,9 +20,7 @@ namespace GunsAreLoud.Client.Audio
                 return false;
             }
 
-            ConfigureFilter(source.source1, tuning, !automaticBodyLoop, scheduledStart);
-            ConfigureFilter(source.source2, tuning, !automaticBodyLoop, scheduledStart);
-
+            GalSourceBinding binding = GalSourceBinding.Of(source);
             if (source is ReverbSuperSource reverbSource)
             {
                 if (tuning.ApplyIndoorRoom)
@@ -40,6 +38,11 @@ namespace GunsAreLoud.Client.Audio
             return false;
         }
 
+        // These filters stay attached on purpose: EFT re-issues its pooled weapon
+        // sources within milliseconds, and add/destroy per shot is real churn.
+        // They are switched off instead, so a source playing someone else's sound
+        // receives no callback of ours at all, and the whole undo is one component
+        // lookup and a flag test once per issuance.
         internal static void Bypass(BetterSource source)
         {
             if (source == null)
@@ -47,18 +50,23 @@ namespace GunsAreLoud.Client.Audio
                 return;
             }
 
-            BypassFilter(source.source1);
+            GalSourceBinding binding = GalSourceBinding.Find(source);
+            if (binding == null || !binding.MarkBypassed())
+            {
+                return;
+            }
+
+            BypassChannel(binding, source.source1);
             if (source is SuperSource superSource)
             {
-                BypassFilter(superSource.source2);
+                BypassChannel(binding, superSource.source2);
             }
             if (source is ReverbSuperSource reverbSource)
             {
                 RestoreRoomResponse(reverbSource);
             }
-            source.GetComponent<PitchedGunshotLayer>()?.StopAll();
-            source.GetComponent<AutomaticBeatTimeline>()?.StopTimeline();
-            source.GetComponent<AutomaticImpactTimeline>()?.StopTimeline();
+            PitchedGunshotLayer.StopForSource(source);
+            binding.BeatTimeline()?.StopTimeline();
         }
 
         internal static void PrepareAutomaticPitchedBeat(
@@ -69,26 +77,28 @@ namespace GunsAreLoud.Client.Audio
             double scheduledStart,
             float durationSeconds)
         {
-            if (source == null ||
-                tuning.LowEndMode != GunshotLowEndMode.PitchedCopy ||
-                tuning.AutomaticPitchedRoute != AutomaticPitchedRoute.CachedReport ||
+            if (source == null) return;
+            GalSourceBinding binding = GalSourceBinding.Of(source);
+            if (tuning.AutomaticPitchedRoute != AutomaticPitchedRoute.CachedReport ||
                 durationSeconds <= 0.001f)
             {
-                CancelCapture(source?.source1);
-                CancelCapture(source?.source2);
+                CancelCapture(binding, source.source1);
+                CancelCapture(binding, source.source2);
                 return;
             }
 
             // A cached route must not inherit an active built-in DSP voice from
             // an F12 route change on a pooled EFT source.
-            source.source1?.GetComponent<AutomaticPitchedGunshotFilter>()?.Bypass();
-            source.source2?.GetComponent<AutomaticPitchedGunshotFilter>()?.Bypass();
+            binding.PitchedFilter(source.source1)?.Bypass();
+            binding.PitchedFilter(source.source2)?.Bypass();
             ArmCapture(
+                binding,
                 source.source1,
                 clipA,
                 scheduledStart,
                 durationSeconds);
             ArmCapture(
+                binding,
                 source.source2,
                 clipB,
                 scheduledStart,
@@ -110,11 +120,7 @@ namespace GunsAreLoud.Client.Audio
                 return false;
             }
 
-            AutomaticBeatTimeline timeline = source.GetComponent<AutomaticBeatTimeline>();
-            if (timeline == null)
-            {
-                timeline = source.gameObject.AddComponent<AutomaticBeatTimeline>();
-            }
+            AutomaticBeatTimeline timeline = GalSourceBinding.Of(source).EnsureBeatTimeline();
             return timeline.Begin(
                 source,
                 tuning,
@@ -125,71 +131,32 @@ namespace GunsAreLoud.Client.Audio
                 context);
         }
 
-        internal static bool BeginAutomaticImpactTimeline(
-            SuperSource source,
-            LocalGunshotAudioTuning tuning,
-            double firstBoundary,
-            double streamStart = double.NaN)
-        {
-            if (source == null || tuning.LowEndMode != GunshotLowEndMode.OriginalBand)
-            {
-                return false;
-            }
-
-            AutomaticImpactTimeline timeline = source.GetComponent<AutomaticImpactTimeline>();
-            if (timeline == null)
-            {
-                timeline = source.gameObject.AddComponent<AutomaticImpactTimeline>();
-            }
-            double anchor = double.IsNaN(streamStart) ? firstBoundary : streamStart;
-            source.source1?.GetComponent<LocalGunshotImpactFilter>()?.BeginStream(anchor);
-            source.source2?.GetComponent<LocalGunshotImpactFilter>()?.BeginStream(anchor);
-            return timeline.Begin(source, tuning, firstBoundary);
-        }
-
-        internal static bool TriggerAutomaticImpactBeat(
-            SuperSource source,
-            LocalGunshotAudioTuning tuning)
-        {
-            return source != null &&
-                tuning.LowEndMode == GunshotLowEndMode.OriginalBand &&
-                source.GetComponent<AutomaticImpactTimeline>()?.TriggerNext(tuning) == true;
-        }
-
         internal static bool EnsureAutomaticRoute(
             SuperSource source, LocalGunshotAudioTuning tuning, AutomaticShotContext context,
             out bool played)
         {
             played = false;
             if (source == null || context == null) return false;
-            bool original = tuning.LowEndMode == GunshotLowEndMode.OriginalBand;
-            bool cached = tuning.LowEndMode == GunshotLowEndMode.PitchedCopy &&
-                tuning.AutomaticPitchedRoute == AutomaticPitchedRoute.CachedReport;
-            int selected = original ? 1 : cached ? 2 : 3;
+            bool cached = tuning.AutomaticPitchedRoute == AutomaticPitchedRoute.CachedReport;
+            int selected = cached ? 2 : 3;
             AutomaticBurstRouting routing = context.Routing;
             int previous = !routing.RouteInitialized ? selected :
-                routing.LastLowEndMode == GunshotLowEndMode.OriginalBand ? 1 :
                 routing.LastPitchedRoute == AutomaticPitchedRoute.CachedReport ? 2 : 3;
-            AutomaticImpactTimeline impact = source.GetComponent<AutomaticImpactTimeline>();
-            AutomaticBeatTimeline beat = source.GetComponent<AutomaticBeatTimeline>();
-            bool impactStreamReady =
-                source.source1?.GetComponent<LocalGunshotImpactFilter>()?.NeedsStreamReset != true &&
-                source.source2?.GetComponent<LocalGunshotImpactFilter>()?.NeedsStreamReset != true;
+            GalSourceBinding binding = GalSourceBinding.Of(source);
+            AutomaticBeatTimeline beat = binding.BeatTimeline();
             bool active = routing.RouteInitialized && ReferenceEquals(routing.BodySource, source) &&
-                (original ? impact?.Active == true && impactStreamReady :
-                cached ? beat?.Active == true : true);
+                (cached ? beat?.Active == true : true);
             bool rebind = AutomaticRouteTransition.ShouldRebind(active, previous, selected);
             routing.BodySource = source;
-            routing.LastLowEndMode = tuning.LowEndMode;
             routing.LastPitchedRoute = tuning.AutomaticPitchedRoute;
             routing.RouteInitialized = true;
             if (!rebind) return false;
 
             if (previous != selected)
             {
-                source.GetComponent<PitchedGunshotLayer>()?.StopAll();
-                source.source1?.GetComponent<AutomaticPitchedGunshotFilter>()?.Bypass();
-                source.source2?.GetComponent<AutomaticPitchedGunshotFilter>()?.Bypass();
+                PitchedGunshotLayer.StopForSource(source);
+                binding.PitchedFilter(source.source1)?.Bypass();
+                binding.PitchedFilter(source.source2)?.Bypass();
             }
 
             AudioSource donor = source.source1 != null && source.source1.isPlaying
@@ -199,16 +166,10 @@ namespace GunsAreLoud.Client.Audio
                 ? AutomaticBeatTiming.CalculateCurrentBoundary(
                     now, donor.timeSamples, donor.clip.samples, donor.clip.frequency, donor.pitch)
                 : now;
-            if (original)
-            {
-                impact?.StopTimeline();
-                played = BeginAutomaticImpactTimeline(source, tuning, boundary, now);
-                return true;
-            }
             if (cached)
             {
                 beat?.StopTimeline();
-                if (beat == null) beat = source.gameObject.AddComponent<AutomaticBeatTimeline>();
+                if (beat == null) beat = binding.EnsureBeatTimeline();
                 played = beat.Begin(source, tuning, source.source1?.clip, source.source2?.clip, boundary,
                     tuning.PitchedLayerLoopBeatSeconds, context);
                 return true;
@@ -224,65 +185,20 @@ namespace GunsAreLoud.Client.Audio
             if (context != null)
             {
                 context.Routing.BodySource = source;
-                context.Routing.LastLowEndMode = tuning.LowEndMode;
                 context.Routing.LastPitchedRoute = tuning.AutomaticPitchedRoute;
                 context.Routing.RouteInitialized = true;
             }
-            AutomaticBeatTimeline beat = source.GetComponent<AutomaticBeatTimeline>();
-            if (beat == null) beat = source.gameObject.AddComponent<AutomaticBeatTimeline>();
+            AutomaticBeatTimeline beat = GalSourceBinding.Of(source).EnsureBeatTimeline();
             if (tuning.AutomaticPitchedRoute != AutomaticPitchedRoute.CachedReport)
                 beat.Bind(source, tuning, clipA, clipB, firstBoundary, tuning.PitchedLayerLoopBeatSeconds);
         }
 
-        internal static void ConfigureAutomaticImpactBeat(SuperSource source, LocalGunshotAudioTuning tuning)
-        {
-            if (source == null) return;
-            // Preserve a preceding fallback's stream until its envelope ends.
-            if (tuning.LowEndMode == GunshotLowEndMode.PitchedCopy &&
-                tuning.AutomaticPitchedRoute == AutomaticPitchedRoute.CachedReport) return;
-            ConfigureFilter(source.source1, tuning, false, 0.0);
-            ConfigureFilter(source.source2, tuning, false, 0.0);
-        }
-
-        internal static bool PlayAutomaticFallback(SuperSource source, LocalGunshotAudioTuning tuning,
-            double boundary, double streamStart)
-        {
-            if (source == null || tuning.DirectBodyGain <= 0.001f) return false;
-            bool first = FallbackChannel(source.source1, tuning, boundary, streamStart);
-            bool second = FallbackChannel(source.source2, tuning, boundary, streamStart);
-            return first || second;
-        }
-
-        private static bool FallbackChannel(AudioSource source, LocalGunshotAudioTuning tuning,
-            double boundary, double streamStart)
-        {
-            if (source == null || source.clip == null) return false;
-            // The live tap follows this filter in Unity's component chain. Do
-            // not bake the temporary addition into a cached donor. Silent
-            // warmup publishes clean body PCM independently of this source.
-            CancelCapture(source);
-            LocalGunshotImpactFilter filter = source.GetComponent<LocalGunshotImpactFilter>();
-            if (filter == null) filter = source.gameObject.AddComponent<LocalGunshotImpactFilter>();
-            filter.Configure(tuning.DirectBodyGain, tuning.PressureFrequencyHz,
-                AudioSettings.outputSampleRate, tuning.HeadphonesDamping.BodyGain,
-                tuning.HeadphonesDamping.TailDbPerSecond, armOnset: false);
-            if (filter.NeedsStreamReset) filter.BeginStream(streamStart);
-            bool played = filter.Trigger(boundary);
-            filter.FinishAfterCurrentEnvelopes(System.Math.Max(boundary, AudioSettings.dspTime));
-            return played;
-        }
-
-        internal static void RetireAutomaticFallback(SuperSource source)
-        {
-            double now = AudioSettings.dspTime;
-            source?.source1?.GetComponent<LocalGunshotImpactFilter>()?.FinishAfterCurrentEnvelopes(now);
-            source?.source2?.GetComponent<LocalGunshotImpactFilter>()?.FinishAfterCurrentEnvelopes(now);
-        }
 
         internal static void UpdateAutomaticInterval(SuperSource source, double changeTime, float beatSeconds)
         {
-            source?.GetComponent<AutomaticImpactTimeline>()?.UpdateInterval(changeTime, beatSeconds);
-            source?.GetComponent<AutomaticBeatTimeline>()?.UpdateInterval(changeTime, beatSeconds);
+            GalSourceBinding binding = GalSourceBinding.Find(source);
+            if (binding == null) return;
+            binding.BeatTimeline()?.UpdateInterval(changeTime, beatSeconds);
         }
 
         internal static bool TriggerAutomaticPitchedBeat(
@@ -292,18 +208,18 @@ namespace GunsAreLoud.Client.Audio
             AutomaticShotContext context = null)
         {
             if (source == null ||
-                tuning.LowEndMode != GunshotLowEndMode.PitchedCopy ||
                 durationSeconds <= 0.001f)
             {
                 return false;
             }
 
+            GalSourceBinding binding = GalSourceBinding.Of(source);
             if (tuning.AutomaticPitchedRoute == AutomaticPitchedRoute.CachedReport)
             {
-                return source.GetComponent<AutomaticBeatTimeline>()?.TriggerNext(tuning, context) == true;
+                return binding.BeatTimeline()?.TriggerNext(tuning, context) == true;
             }
 
-            source.GetComponent<PitchedGunshotLayer>()?.StopAll();
+            PitchedGunshotLayer.StopForSource(source);
             float donorOcclusion = Mathf.Clamp01(source.OcclusionVolumeFactor);
             float lowpassHz = PitchedGunshotLayer.CalculateOccludedLowpass(
                 tuning.PitchedLayerLowpassHz,
@@ -327,6 +243,7 @@ namespace GunsAreLoud.Client.Audio
                 tuning.PitchedLayerSemitones);
 
             bool first = ConfigureAndTriggerAutomaticFilter(
+                binding,
                 source.source1,
                 tuning.AutomaticPitchedRoute,
                 pitchRatio,
@@ -337,6 +254,7 @@ namespace GunsAreLoud.Client.Audio
                 gain,
                 tuning.HeadphonesDamping.TailDbPerSecond);
             bool second = ConfigureAndTriggerAutomaticFilter(
+                binding,
                 source.source2,
                 tuning.AutomaticPitchedRoute,
                 pitchRatio,
@@ -349,85 +267,89 @@ namespace GunsAreLoud.Client.Audio
             return first || second;
         }
 
-        private static void ConfigureFilter(AudioSource source, LocalGunshotAudioTuning tuning,
-            bool armOnset, double scheduledStart)
+        private static void BypassChannel(GalSourceBinding binding, AudioSource source)
         {
             if (source == null)
             {
                 return;
             }
 
-            LocalGunshotImpactFilter filter = source.GetComponent<LocalGunshotImpactFilter>();
-            if (filter == null)
-            {
-                filter = source.gameObject.AddComponent<LocalGunshotImpactFilter>();
-            }
-            filter.Configure(
-                tuning.LowEndMode == GunshotLowEndMode.OriginalBand
-                    ? tuning.DirectBodyGain
-                    : 0f,
-                tuning.PressureFrequencyHz,
-                AudioSettings.outputSampleRate,
-                tuning.HeadphonesDamping.BodyGain,
-                tuning.HeadphonesDamping.TailDbPerSecond,
-                armOnset);
-            if (armOnset)
-                filter.BeginStream(scheduledStart);
+            AutomaticPitchedGunshotFilter pitched = binding.PitchedFilter(source);
+            AutomaticBeatCapture capture = binding.Capture(source);
+            pitched?.Bypass();
+            capture?.Cancel();
+            // Bypassing is not enough: a disabled behaviour receives no
+            // OnAudioFilterRead at all, whereas a bypassed one still costs a
+            // callback per buffer for every foreign sound on this pooled source.
+            SetActive(pitched, false);
+            // The capture component stays on until it has published its cache,
+            // otherwise the next shot would find the cache cold again.
+            if (capture == null || !capture.AwaitingPublish) SetActive(capture, false);
         }
 
-        private static void BypassFilter(AudioSource source)
+        // Every filter resets its own audio-thread stream by generation when it is
+        // configured, so re-enabling here cannot resume a stale envelope.
+        private static void SetActive(Behaviour component, bool active)
         {
-            if (source == null)
-            {
-                return;
-            }
-
-            source.GetComponent<LocalGunshotImpactFilter>()?.Bypass();
-            source.GetComponent<AutomaticPitchedGunshotFilter>()?.Bypass();
-            source.GetComponent<AutomaticBeatCapture>()?.Cancel();
+            if (component != null && component.enabled != active) component.enabled = active;
         }
 
-        private static void CancelCapture(AudioSource source)
+        private static void CancelCapture(GalSourceBinding binding, AudioSource source)
         {
-            source?.GetComponent<AutomaticBeatCapture>()?.Cancel();
+            if (source == null) return;
+            AutomaticBeatCapture capture = binding.Capture(source);
+            if (capture == null) return;
+            capture.Cancel();
+            if (!capture.AwaitingPublish) SetActive(capture, false);
         }
 
         private static void ArmCapture(
+            GalSourceBinding binding,
             AudioSource source,
             AudioClip clip,
             double scheduledStart,
             float durationSeconds)
         {
-            if (source == null || clip == null)
+            if (source == null || clip == null || durationSeconds <= 0.001f)
             {
                 return;
             }
 
-            AutomaticBeatCapture capture = source.GetComponent<AutomaticBeatCapture>();
-            if (capture == null)
+            // A warm cache needs no live tap. Ask before attaching one: the
+            // component used to be added on the first automatic shot with every
+            // weapon and then sat on the pooled source for the rest of the raid.
+            int rate = Mathf.Max(8000, AudioRuntimeState.OutputSampleRate);
+            float span = Mathf.Clamp(durationSeconds, 0.01f, 0.5f);
+            if (AutomaticCopyCache.ContainsRoundBody(clip, span, rate))
             {
-                capture = source.gameObject.AddComponent<AutomaticBeatCapture>();
+                CancelCapture(binding, source);
+                return;
             }
+
+            GalSourceCensus.NoteSource(source.GetInstanceID());
+            AutomaticBeatCapture capture = binding.EnsureCapture(source);
+            SetActive(capture, true);
             capture.Arm(
                 clip,
                 scheduledStart,
                 durationSeconds,
-                AudioSettings.outputSampleRate);
+                rate);
         }
 
         private static void GetCachedBeat(
             AudioClip clip,
             float durationSeconds,
-            out CachedAutomaticBeat beat)
+            out CachedAutomaticCopy beat)
         {
-            AutomaticBeatClipCache.TryGet(
+            AutomaticCopyCache.TryGetRoundBody(
                 clip,
                 durationSeconds,
-                AudioSettings.outputSampleRate,
+                AudioRuntimeState.OutputSampleRate,
                 out beat);
         }
 
         private static bool ConfigureAndTriggerAutomaticFilter(
+            GalSourceBinding binding,
             AudioSource source,
             AutomaticPitchedRoute route,
             float pitchRatio,
@@ -443,12 +365,9 @@ namespace GunsAreLoud.Client.Audio
                 return false;
             }
 
-            AutomaticPitchedGunshotFilter filter =
-                source.GetComponent<AutomaticPitchedGunshotFilter>();
-            if (filter == null)
-            {
-                filter = source.gameObject.AddComponent<AutomaticPitchedGunshotFilter>();
-            }
+            GalSourceCensus.NoteSource(source.GetInstanceID());
+            AutomaticPitchedGunshotFilter filter = binding.EnsurePitchedFilter(source);
+            SetActive(filter, true);
 
             filter.Configure(
                 route,
@@ -458,7 +377,7 @@ namespace GunsAreLoud.Client.Audio
                 durationSeconds,
                 fadePercent,
                 gain,
-                AudioSettings.outputSampleRate,
+                AudioRuntimeState.OutputSampleRate,
                 headphoneTailDbPerSecond);
             filter.Trigger();
             return true;

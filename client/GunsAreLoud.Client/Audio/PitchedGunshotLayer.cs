@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using GunsAreLoud.Client.Configuration;
 using GunsAreLoud.Client.Runtime;
 using UnityEngine;
@@ -9,7 +10,7 @@ namespace GunsAreLoud.Client.Audio
     {
         internal readonly bool Scheduled;
         internal readonly bool Playing;
-        internal readonly bool CachedAutomaticBeat;
+        internal readonly bool CachedAutomaticCopy;
         internal readonly float PitchRatio;
         internal readonly float HighpassHz;
         internal readonly float LowpassHz;
@@ -27,7 +28,7 @@ namespace GunsAreLoud.Client.Audio
         internal PitchedLayerTelemetry(
             bool scheduled,
             bool playing,
-            bool cachedAutomaticBeat,
+            bool cachedAutomaticCopy,
             float pitchRatio,
             float highpassHz,
             float lowpassHz,
@@ -44,7 +45,7 @@ namespace GunsAreLoud.Client.Audio
         {
             Scheduled = scheduled;
             Playing = playing;
-            CachedAutomaticBeat = cachedAutomaticBeat;
+            CachedAutomaticCopy = cachedAutomaticCopy;
             PitchRatio = pitchRatio;
             HighpassHz = highpassHz;
             LowpassHz = lowpassHz;
@@ -71,11 +72,37 @@ namespace GunsAreLoud.Client.Audio
         // extreme pitch/rate combinations recycle the oldest voice.
         private const int MaximumVoices = 64;
         internal static PitchedGunshotLayer ReportPool { get; private set; }
+        // Cached beat clips are destroyed when the last weapon releases them.
+        // Every live pool must release its voices first, not only the report pool.
+        private static readonly List<PitchedGunshotLayer> Layers = new List<PitchedGunshotLayer>();
+        // Diagnostics only: a bounded pool that keeps creating voices is the
+        // signal to look for, not the instantaneous count on its own.
+        private static int _createdVoices;
+
+        internal static int CreatedVoiceCount => _createdVoices;
+
+        internal static void CountActiveVoices(out int voices, out int pools)
+        {
+            voices = 0;
+            pools = 0;
+            for (int index = 0; index < Layers.Count; index++)
+            {
+                PitchedGunshotLayer layer = Layers[index];
+                if (layer == null) continue;
+                pools++;
+                Voice[] layerVoices = layer._voices;
+                for (int voiceIndex = 0; voiceIndex < layerVoices.Length; voiceIndex++)
+                {
+                    Voice voice = layerVoices[voiceIndex];
+                    if (voice != null && voice.Active) voices++;
+                }
+            }
+        }
 
         private readonly Voice[] _voices = new Voice[MaximumVoices];
         private int _nextVoice;
         private bool _lastScheduled;
-        private bool _lastCachedAutomaticBeat;
+        private bool _lastCachedAutomaticCopy;
         private float _lastPitchRatio = 1f;
         private float _lastHighpassHz;
         private float _lastLowpassHz;
@@ -94,17 +121,13 @@ namespace GunsAreLoud.Client.Audio
             float originalDurationSeconds)
         {
             if (source == null ||
-                tuning.LowEndMode != GunshotLowEndMode.PitchedCopy ||
                 tuning.DirectBodyGain <= 0.001f)
             {
                 return false;
             }
 
-            PitchedGunshotLayer layer = source.GetComponent<PitchedGunshotLayer>();
-            if (layer == null)
-            {
-                layer = source.gameObject.AddComponent<PitchedGunshotLayer>();
-            }
+            PitchedGunshotLayer layer = EnsureReportPool();
+            if (layer == null) return false;
 
             return layer.PlayInternal(
                 source,
@@ -113,51 +136,61 @@ namespace GunsAreLoud.Client.Audio
                 originalDurationSeconds,
                 default,
                 default,
-                false);
+                false,
+                detached: OutlivesSourceLease(cachedAutomaticCopy: false, isFullReport: false));
+        }
+
+        /// <summary>
+        /// Whether a copy has to outlive the pooled source it was made from.
+        /// <para>
+        /// EFT re-issues that source to the next sound in the game — a casing, a
+        /// footstep, anyone's shot — and a copy still bound to it is cut there and
+        /// then. A copy is pitched down, so it always runs longer than the sound
+        /// it came from: a full report by seconds, and the recorded tail played
+        /// when the trigger is released by about as much again. Both must finish
+        /// on their own.
+        /// </para>
+        /// The one copy that stays bound is the short authored body of a single
+        /// round inside a burst: it is shorter than the interval to the next
+        /// round, and stopping it when the source moves on is what keeps a burst
+        /// from stacking.
+        /// </summary>
+        internal static bool OutlivesSourceLease(bool cachedAutomaticCopy, bool isFullReport)
+        {
+            return !cachedAutomaticCopy || isFullReport;
         }
 
         internal static bool PlayCachedAutomaticBeat(
             SuperSource source,
             LocalGunshotAudioTuning tuning,
             double scheduledStart,
-            CachedAutomaticBeat beatA,
-            CachedAutomaticBeat beatB)
+            CachedAutomaticCopy copyA,
+            CachedAutomaticCopy copyB)
         {
             if (source == null ||
-                tuning.LowEndMode != GunshotLowEndMode.PitchedCopy ||
                 tuning.DirectBodyGain <= 0.001f ||
-                (beatA.Clip == null && beatB.Clip == null))
+                (copyA.Clip == null && copyB.Clip == null))
             {
                 return false;
             }
 
-            bool fullReport = beatA.HasAuthoredTail || beatB.HasAuthoredTail;
-            PitchedGunshotLayer layer = fullReport ? ReportPool : source.GetComponent<PitchedGunshotLayer>();
-            if (layer == null)
-            {
-                // EFT recycles its body source at release, before a lowered tail
-                // has finished. Full report voices must outlive that source lease.
-                if (fullReport)
-                {
-                    if (Plugin.Runtime == null) return false;
-                    var owner = new GameObject("GunsAreLoud.CompleteReportPool");
-                    owner.transform.SetParent(Plugin.Runtime.transform, false);
-                    ReportPool = layer = owner.AddComponent<PitchedGunshotLayer>();
-                }
-                else layer = source.gameObject.AddComponent<PitchedGunshotLayer>();
-            }
+            PitchedGunshotLayer layer = EnsureReportPool();
+            if (layer == null) return false;
 
             float sourceSpanSeconds = Mathf.Max(
-                CalculateCachedSourceDuration(beatA.SourceSpanSeconds, beatA.NativePitch, source.source1?.pitch ?? 1f),
-                CalculateCachedSourceDuration(beatB.SourceSpanSeconds, beatB.NativePitch, source.source2?.pitch ?? 1f));
+                CalculateCachedSourceDuration(copyA.SourceSpanSeconds, copyA.NativePitch, source.source1?.pitch ?? 1f),
+                CalculateCachedSourceDuration(copyB.SourceSpanSeconds, copyB.NativePitch, source.source2?.pitch ?? 1f));
             return layer.PlayInternal(
                 source,
                 tuning,
                 scheduledStart,
                 sourceSpanSeconds,
-                beatA,
-                beatB,
-                true);
+                copyA,
+                copyB,
+                true,
+                detached: OutlivesSourceLease(
+                    cachedAutomaticCopy: true,
+                    isFullReport: copyA.IsFullReport || copyB.IsFullReport));
         }
 
         internal static float CalculateOriginalDuration(
@@ -188,7 +221,15 @@ namespace GunsAreLoud.Client.Audio
         {
             if (sampleEnd > sampleStart)
             {
-                return Mathf.Clamp((float)(sampleEnd - sampleStart), 0.01f, 10f);
+                // EFT's window is when it intends to be done with the sample, not
+                // how long the recording is; for some tails it reserves the best
+                // part of ten seconds. The copy reproduces the recording, so the
+                // recording is the bound — without it the pitched copy of an m60
+                // tail ran for ten seconds against a recording of one.
+                float scheduled = (float)(sampleEnd - sampleStart);
+                float recorded = clipLength / Mathf.Max(0.1f, samplePitch);
+                return Mathf.Clamp(
+                    clipLength > 0f ? Mathf.Min(scheduled, recorded) : scheduled, 0.01f, 10f);
             }
 
             if (loopBeatSeconds > 0.001f)
@@ -231,6 +272,47 @@ namespace GunsAreLoud.Client.Audio
                 Mathf.Clamp(tailSeconds, 0f, 0.6f),
                 0.01f,
                 10f);
+        }
+
+        private const float MinimumReleaseFadeSeconds = 0.02f;
+        // Covers one DSP buffer of alignment between the envelope's first
+        // callback and the scheduled start, so the hard source stop can never
+        // cut a release ramp that is still sounding.
+        private const double ReleaseStopMarginSeconds = 0.05;
+
+        /// <summary>
+        /// The longest an automatic copy may keep sounding once a later round of
+        /// the same burst has followed it. A pitched-down full report is longer
+        /// than the interval between rounds, so concurrency is a fixed number of
+        /// fire intervals rather than a function of the rate of fire. Never
+        /// applied to a copy on its own: a single shot and the last round of a
+        /// burst have no successor and keep their whole recorded tail.
+        /// </summary>
+        internal static float CalculateAutomaticOverlapBound(
+            float durationSeconds,
+            float loopBeatSeconds,
+            float overlapShots)
+        {
+            if (loopBeatSeconds <= 0.001f)
+            {
+                return durationSeconds;
+            }
+
+            float budget = Mathf.Clamp(loopBeatSeconds, 0.001f, 10f) *
+                Mathf.Clamp(overlapShots, 1f, 32f);
+            return Mathf.Clamp(Mathf.Min(durationSeconds, budget), 0.01f, 10f);
+        }
+
+        /// <summary>
+        /// Fade used when a later round shortens an earlier copy: the configured
+        /// fade-out portion of the overlap window, never shorter than a click-safe
+        /// minimum and never longer than the window itself.
+        /// </summary>
+        internal static float CalculateReleaseFade(float windowSeconds, float fadePercent)
+        {
+            float window = Mathf.Max(0.001f, windowSeconds);
+            float requested = window * Mathf.Clamp(fadePercent, 5f, 100f) * 0.01f;
+            return Mathf.Clamp(requested, Mathf.Min(MinimumReleaseFadeSeconds, window), window);
         }
 
         internal static float CalculateLayerGain(
@@ -313,7 +395,7 @@ namespace GunsAreLoud.Client.Audio
             return new PitchedLayerTelemetry(
                 _lastScheduled,
                 playing,
-                _lastCachedAutomaticBeat,
+                _lastCachedAutomaticCopy,
                 _lastPitchRatio,
                 _lastHighpassHz,
                 _lastLowpassHz,
@@ -336,7 +418,37 @@ namespace GunsAreLoud.Client.Audio
                 voice?.Stop();
             }
             _lastScheduled = false;
-            _lastCachedAutomaticBeat = false;
+            _lastCachedAutomaticCopy = false;
+        }
+
+        /// <summary>
+        /// Stops the copies that belong to one pooled EFT source, the way an
+        /// in-source layer used to be stopped when that source was released or
+        /// re-issued. Full reports are deliberately not bound to a source: their
+        /// tail is longer than the lease and must finish.
+        /// </summary>
+        internal static void StopForSource(BetterSource source)
+        {
+            PitchedGunshotLayer pool = ReportPool;
+            if (pool == null || source == null) return;
+            int ownerId = source.GetInstanceID();
+            foreach (Voice voice in pool._voices)
+            {
+                if (voice != null && voice.BelongsTo(ownerId)) voice.Stop();
+            }
+        }
+
+        // One pool for every copy. Voices are 2D and read everything they need
+        // from the donor at scheduling time, so they do not need to live on the
+        // donor's GameObject, and the pooled sources stay free of our components.
+        private static PitchedGunshotLayer EnsureReportPool()
+        {
+            if (ReportPool != null) return ReportPool;
+            if (Plugin.Runtime == null) return null;
+            var owner = new GameObject("GunsAreLoud.CompleteReportPool");
+            owner.transform.SetParent(Plugin.Runtime.transform, false);
+            ReportPool = owner.AddComponent<PitchedGunshotLayer>();
+            return ReportPool;
         }
 
         private void Update()
@@ -352,9 +464,31 @@ namespace GunsAreLoud.Client.Audio
             }
         }
 
+        private void Awake() => GalSourceCensus.Created(GalComponentKind.PitchedLayer);
+
+        private void OnEnable()
+        {
+            GalSourceCensus.Enabled(GalComponentKind.PitchedLayer);
+            if (!Layers.Contains(this)) Layers.Add(this);
+        }
+
         private void OnDisable()
         {
+            GalSourceCensus.Disabled(GalComponentKind.PitchedLayer);
+            Layers.Remove(this);
             StopAll();
+        }
+
+        private void OnDestroy() => GalSourceCensus.Destroyed(GalComponentKind.PitchedLayer);
+
+        internal static void StopAllLayers()
+        {
+            for (int index = Layers.Count - 1; index >= 0; index--)
+            {
+                PitchedGunshotLayer layer = Layers[index];
+                if (layer == null) Layers.RemoveAt(index);
+                else layer.StopAll();
+            }
         }
 
         private bool PlayInternal(
@@ -362,9 +496,10 @@ namespace GunsAreLoud.Client.Audio
             LocalGunshotAudioTuning tuning,
             double scheduledStart,
             float originalDurationSeconds,
-            CachedAutomaticBeat beatA,
-            CachedAutomaticBeat beatB,
-            bool cachedAutomaticBeat)
+            CachedAutomaticCopy copyA,
+            CachedAutomaticCopy copyB,
+            bool cachedAutomaticCopy,
+            bool detached)
         {
             float pitchRatio = CalculatePitchRatio(tuning.PitchedLayerSemitones);
             float donorOcclusion = Mathf.Clamp01(source.OcclusionVolumeFactor);
@@ -392,10 +527,14 @@ namespace GunsAreLoud.Client.Audio
             float fadePercent = Mathf.Clamp(tuning.PitchedLayerFadePercent, 5f, 100f);
             float sourceSpanSeconds = Mathf.Clamp(originalDurationSeconds, 0.01f, 10f);
             float excitationSeconds = CalculatePitchedDuration(sourceSpanSeconds, pitchRatio);
-            float tailSeconds = cachedAutomaticBeat && !beatA.HasAuthoredTail && !beatB.HasAuthoredTail
+            float tailSeconds = cachedAutomaticCopy && !copyA.IsFullReport && !copyB.IsFullReport
                 ? Mathf.Clamp(tuning.AutomaticPitchedTailSeconds, 0f, 0.6f)
                 : 0f;
-            float durationSeconds = cachedAutomaticBeat
+            // Every copy is scheduled whole. Only a later round of the same burst
+            // shortens it (ReleasePredecessors), so a single shot and the last
+            // round keep the full recorded tail: in FullReportPerShot that copy is
+            // the only tail the player hears, the release copy being skipped.
+            float durationSeconds = cachedAutomaticCopy
                 ? CalculateCachedOutputDuration(
                     sourceSpanSeconds,
                     pitchRatio,
@@ -406,8 +545,8 @@ namespace GunsAreLoud.Client.Audio
                 return false;
             }
 
-            AudioClip normalizationClipA = cachedAutomaticBeat ? beatA.OriginalClip : source.source1?.clip;
-            AudioClip normalizationClipB = cachedAutomaticBeat ? beatB.OriginalClip : source.source2?.clip;
+            AudioClip normalizationClipA = cachedAutomaticCopy ? copyA.OriginalClip : source.source1?.clip;
+            AudioClip normalizationClipB = cachedAutomaticCopy ? copyB.OriginalClip : source.source2?.clip;
             LowEndNormalizationResult levelA = LowEndNormalizationCache.Evaluate(normalizationClipA, tuning);
             LowEndNormalizationResult levelB = LowEndNormalizationCache.Evaluate(normalizationClipB, tuning);
             bool readyA = levelA.Ready, readyB = levelB.Ready;
@@ -420,15 +559,20 @@ namespace GunsAreLoud.Client.Audio
                 levelA = levelB = new LowEndNormalizationResult(1f, false);
             }
 
+            // One reservation covers the summary line and the per-channel
+            // post-envelope lines. Two independent TryBegin calls competed for
+            // the same rate gate and described different shots.
+            bool measureLevels = DetailedDiagnostics.TryBegin(
+                DiagnosticEventKind.Normalization, out DiagnosticReservation reservation);
             Voice voice = GetNextVoice();
             if (!voice.Schedule(
                 source.source1,
                 source.source2,
-                beatA.Clip,
-                beatB.Clip,
-                beatA.NativePitch,
-                beatB.NativePitch,
-                cachedAutomaticBeat,
+                copyA.Clip,
+                copyB.Clip,
+                copyA.NativePitch,
+                copyB.NativePitch,
+                cachedAutomaticCopy,
                 pitchRatio,
                 highpassHz,
                 lowpassHz,
@@ -441,14 +585,20 @@ namespace GunsAreLoud.Client.Audio
                 scheduledStart,
                 tuning.HeadphonesDamping.TailDbPerSecond,
                 levelA,
-                levelB))
+                levelB,
+                measureLevels,
+                reservation))
             {
                 return false;
             }
 
-            if (Plugin.ModConfig?.DiagnosticShotLog.Value == true)
-                Plugin.Log.LogInfo($"low-end normalization voice={voice.DiagnosticId} clip={normalizationClipA?.name ?? normalizationClipB?.name} " +
-                    $"amount={tuning.LowEndNormalizationPercent:0}% contrast={tuning.CaliberContrastPercent:0}% " +
+            if (measureLevels)
+                DetailedDiagnostics.Commit(
+                    reservation,
+                    $"low-end normalization voice={voice.DiagnosticId} clip={normalizationClipA?.name ?? normalizationClipB?.name} " +
+                    // Reported in the same unit the F12 controls now use.
+                    $"amount={tuning.LowEndNormalizationPercent * Configuration.ModConfig.LowEndNormalizationSpanDb / 100f:0.0}dB " +
+                    $"contrast={tuning.CaliberContrastPercent * Configuration.ModConfig.CartridgeContrastSpanDb / 100f:0.0}dB " +
                     $"basis={(tuning.NormalizeBass ? "bass180" : "wide")} factorA={levelA.BodyGain:0.000} readyA={readyA} factorB={levelB.BodyGain:0.000} readyB={readyB} " +
                     $"decayGainA={levelA.DecayGain:0.000} decayReadyA={levelA.DecayReady} decayRmsA={levelA.DecayRms:0.00000} " +
                     $"decayTargetA={levelA.DecayTargetRms:0.00000} decayStartA={levelA.DecayStartSeconds * 1000:0}ms decayLimitedA={levelA.DecayLimited} " +
@@ -460,7 +610,7 @@ namespace GunsAreLoud.Client.Audio
                     $"headphoneTailDecay={tuning.HeadphonesDamping.TailDbPerSecond:0.0}dB/s");
 
             _lastScheduled = true;
-            _lastCachedAutomaticBeat = cachedAutomaticBeat;
+            _lastCachedAutomaticCopy = cachedAutomaticCopy;
             _lastPitchRatio = pitchRatio;
             _lastHighpassHz = highpassHz;
             _lastLowpassHz = lowpassHz;
@@ -471,7 +621,47 @@ namespace GunsAreLoud.Client.Audio
             _lastGain = totalGain;
             _lastOcclusion = 1f - donorOcclusion;
             _lastVoice = voice;
+            voice.BindOwner(detached ? 0 : source.GetInstanceID());
+            if (cachedAutomaticCopy && tuning.PitchedLayerLoopBeatSeconds > 0.001f)
+            {
+                voice.MarkBurstCopy();
+                ReleasePredecessors(
+                    voice,
+                    tuning.PitchedLayerLoopBeatSeconds,
+                    tuning.AutomaticReportOverlapShots,
+                    fadePercent);
+            }
             return true;
+        }
+
+        // Called once a burst copy is scheduled. Earlier copies still sounding are
+        // asked to finish within the overlap window of their own start; the newest
+        // copy stays whole until a later round follows it, which is what keeps the
+        // full tail on a single shot and on the last round of a burst.
+        private void ReleasePredecessors(
+            Voice latest,
+            float loopBeatSeconds,
+            float overlapShots,
+            float fadePercent)
+        {
+            float window = CalculateAutomaticOverlapBound(10f, loopBeatSeconds, overlapShots);
+            float fade = CalculateReleaseFade(window, fadePercent);
+            double now = AudioSettings.dspTime;
+            int released = 0;
+            foreach (Voice voice in _voices)
+            {
+                if (voice == null || ReferenceEquals(voice, latest) || !voice.BurstCopy ||
+                    !voice.Active || voice.Start > latest.Start)
+                    continue;
+                if (voice.ReleaseBy(voice.Start + window, fade, now)) released++;
+            }
+
+            if (released > 0 && DetailedDiagnostics.TryBegin(
+                DiagnosticEventKind.AutomaticTimeline, out DiagnosticReservation reservation))
+                DetailedDiagnostics.Commit(
+                    reservation,
+                    $"automatic report overlap released={released} " +
+                    $"window={window * 1000f:0}ms fade={fade * 1000f:0}ms");
         }
 
         private Voice GetNextVoice()
@@ -484,6 +674,7 @@ namespace GunsAreLoud.Client.Audio
                 {
                     candidate = new Voice(transform, index);
                     _voices[index] = candidate;
+                    _createdVoices++;
                 }
 
                 candidate.StopIfEnvelopeCompleted();
@@ -515,6 +706,7 @@ namespace GunsAreLoud.Client.Audio
             private double _scheduledEnd;
             private static long _nextDiagnosticId;
             private bool _measureLevels;
+            private DiagnosticReservation _levelReservation;
             internal long DiagnosticId { get; private set; }
 
             internal Voice(Transform parent, int index)
@@ -537,6 +729,48 @@ namespace GunsAreLoud.Client.Audio
 
             internal bool Active => _scheduledA || _scheduledB;
 
+            private double _start;
+            private bool _burstCopy;
+            private int _ownerId;
+            private double _releasedEnd = double.PositiveInfinity;
+
+            internal double Start => _start;
+            internal bool BurstCopy => _burstCopy;
+
+            internal void MarkBurstCopy() => _burstCopy = true;
+
+            /// <param name="ownerId">Instance id of the pooled EFT source whose
+            /// release should also end this copy, or 0 for a copy that must finish
+            /// on its own (a full report, whose tail outlives the lease).</param>
+            internal void BindOwner(int ownerId) => _ownerId = ownerId;
+
+            internal bool BelongsTo(int ownerId) =>
+                _ownerId != 0 && _ownerId == ownerId && Active;
+
+            /// <summary>
+            /// Shortens this copy so it finishes by <paramref name="endDsp"/> with
+            /// an equal-power fade. Returns false when it already ends at or before
+            /// that time, so the same request repeated by every later round of the
+            /// burst costs nothing and never moves an earlier release later.
+            /// </summary>
+            internal bool ReleaseBy(double endDsp, float fadeSeconds, double now)
+            {
+                if (!Active || endDsp >= _releasedEnd) return false;
+                double fade = Math.Max(MinimumReleaseFadeSeconds, fadeSeconds);
+                double end = Math.Max(endDsp, now + fade);
+                if (end >= _scheduledEnd) return false;
+
+                float startSeconds = (float)(end - fade - _start);
+                if (_scheduledA) _envelopeA.ScheduleRelease(startSeconds, (float)fade);
+                if (_scheduledB) _envelopeB.ScheduleRelease(startSeconds, (float)fade);
+                double stopAt = end + ReleaseStopMarginSeconds;
+                if (_scheduledA) _sourceA.SetScheduledEndTime(stopAt);
+                if (_scheduledB) _sourceB.SetScheduledEndTime(stopAt);
+                _scheduledEnd = stopAt;
+                _releasedEnd = endDsp;
+                return true;
+            }
+
             internal bool Schedule(
                 AudioSource donorA,
                 AudioSource donorB,
@@ -544,7 +778,7 @@ namespace GunsAreLoud.Client.Audio
                 AudioClip overrideClipB,
                 bool nativePitchA,
                 bool nativePitchB,
-                bool cachedAutomaticBeat,
+                bool cachedAutomaticCopy,
                 float pitchRatio,
                 float highpassHz,
                 float lowpassHz,
@@ -557,13 +791,21 @@ namespace GunsAreLoud.Client.Audio
                 double scheduledStart,
                 float headphoneTailDbPerSecond,
                 LowEndNormalizationResult calibrationA,
-                LowEndNormalizationResult calibrationB)
+                LowEndNormalizationResult calibrationB,
+                bool measureLevels,
+                DiagnosticReservation levelReservation)
             {
                 Stop();
-                _measureLevels = Plugin.ModConfig?.DiagnosticShotLog.Value == true;
+                _measureLevels = measureLevels;
+                _levelReservation = levelReservation;
                 DiagnosticId = ++_nextDiagnosticId;
                 double intendedEnd = scheduledStart + durationSeconds;
                 double start = Math.Max(scheduledStart, AudioSettings.dspTime + 0.002);
+                // A re-issued pooled voice starts whole: only its own successor
+                // may shorten it, never a release aimed at its previous copy.
+                _start = start;
+                _burstCopy = false;
+                _releasedEnd = double.PositiveInfinity;
                 _scheduledEnd = Math.Max(start + 0.005, intendedEnd);
                 float effectiveDurationSeconds = (float)(_scheduledEnd - start);
                 _scheduledA = ScheduleChannel(
@@ -574,7 +816,7 @@ namespace GunsAreLoud.Client.Audio
                     donorA,
                     overrideClipA,
                     nativePitchA,
-                    cachedAutomaticBeat,
+                    cachedAutomaticCopy,
                     pitchRatio,
                     highpassHz,
                     lowpassHz,
@@ -597,7 +839,7 @@ namespace GunsAreLoud.Client.Audio
                     donorB,
                     overrideClipB,
                     nativePitchB,
-                    cachedAutomaticBeat,
+                    cachedAutomaticCopy,
                     pitchRatio,
                     highpassHz,
                     lowpassHz,
@@ -656,17 +898,22 @@ namespace GunsAreLoud.Client.Audio
                     if (_scheduledA) LogLevel("A", _sourceA, _envelopeA);
                     if (_scheduledB) LogLevel("B", _sourceB, _envelopeB);
                 }
-                StopChannel(_sourceA, _tailA, _envelopeA);
-                StopChannel(_sourceB, _tailB, _envelopeB);
+                StopChannel(_sourceA, _bandA, _tailA, _envelopeA);
+                StopChannel(_sourceB, _bandB, _tailB, _envelopeB);
                 _scheduledA = false;
                 _scheduledB = false;
                 _scheduledEnd = 0.0;
+                _ownerId = 0;
+                _measureLevels = false;
+                _levelReservation = default;
             }
 
             private void LogLevel(string channel, AudioSource source, PitchedGunshotEnvelopeFilter envelope)
             {
                 PitchedEnvelopeTelemetry t = envelope.GetTelemetry();
-                Plugin.Log.LogInfo($"low-end voice voice={DiagnosticId} channel={channel} clip={source.clip?.name} " +
+                DetailedDiagnostics.Commit(
+                    _levelReservation,
+                    $"low-end voice voice={DiagnosticId} channel={channel} clip={source.clip?.name} " +
                     $"stage=post-envelope attackRms={t.AttackRms:0.00000} attackFrames={t.AttackFrames} " +
                     $"bassAttackRms={t.BassAttackRms:0.00000} textureAttackRms={t.TextureAttackRms:0.00000} split=180Hz " +
                     $"tailRms={t.TailRms:0.00000} tailFrames={t.TailFrames} sourceVolume={source.volume:0.000} " +
@@ -696,6 +943,8 @@ namespace GunsAreLoud.Client.Audio
                 band = channelObject.AddComponent<PitchedBandPassFilter>();
                 tail = channelObject.AddComponent<PitchedGunshotTailFilter>();
                 envelope = channelObject.AddComponent<PitchedGunshotEnvelopeFilter>();
+                // Created dormant: a voice costs nothing until it is scheduled.
+                channelObject.SetActive(false);
             }
 
             private static bool ScheduleChannel(
@@ -706,7 +955,7 @@ namespace GunsAreLoud.Client.Audio
                 AudioSource donor,
                 AudioClip overrideClip,
                 bool nativePitch,
-                bool cachedAutomaticBeat,
+                bool cachedAutomaticCopy,
                 float pitchRatio,
                 float highpassHz,
                 float lowpassHz,
@@ -722,13 +971,15 @@ namespace GunsAreLoud.Client.Audio
                 float headphoneTailDbPerSecond,
                 LowEndNormalizationResult calibration)
             {
-                AudioClip playbackClip = cachedAutomaticBeat ? overrideClip : donor?.clip;
+                AudioClip playbackClip = cachedAutomaticCopy ? overrideClip : donor?.clip;
                 if (donor == null || playbackClip == null || donor.volume <= 0.0001f)
                 {
                     envelope.Bypass();
                     return false;
                 }
 
+                // Wake the channel only once there is something to play on it.
+                if (!target.gameObject.activeSelf) target.gameObject.SetActive(true);
                 target.clip = playbackClip;
                 target.outputAudioMixerGroup = donor.outputAudioMixerGroup;
                 target.priority = donor.priority;
@@ -736,7 +987,7 @@ namespace GunsAreLoud.Client.Audio
                 target.panStereo = donor.panStereo;
                 target.ignoreListenerPause = donor.ignoreListenerPause;
                 target.pitch = Mathf.Clamp(
-                    cachedAutomaticBeat && !nativePitch ? pitchRatio : donor.pitch * pitchRatio,
+                    cachedAutomaticCopy && !nativePitch ? pitchRatio : donor.pitch * pitchRatio,
                     0.1f,
                     3f);
                 target.volume = Mathf.Clamp01(donor.volume * sourceGain);
@@ -745,13 +996,13 @@ namespace GunsAreLoud.Client.Audio
 
                 // Calibration is wide-band. Keep the authored band-pass response
                 // without the former crossover's additional phase rotation.
-                band.Configure(AudioSettings.outputSampleRate, highpassHz, lowpassHz);
-                if (cachedAutomaticBeat)
+                band.Configure(AudioRuntimeState.OutputSampleRate, highpassHz, lowpassHz);
+                if (cachedAutomaticCopy)
                 {
                     tail.Configure(
                         excitationSeconds,
                         tailSeconds,
-                        AudioSettings.outputSampleRate);
+                        AudioRuntimeState.OutputSampleRate);
                 }
                 else
                 {
@@ -761,8 +1012,8 @@ namespace GunsAreLoud.Client.Audio
                     durationSeconds,
                     fadePercent,
                     userGain,
-                    startImmediately: cachedAutomaticBeat,
-                    sampleRate: AudioSettings.outputSampleRate,
+                    startImmediately: cachedAutomaticCopy,
+                    sampleRate: AudioRuntimeState.OutputSampleRate,
                     measureLevels: measureLevels,
                     headphoneTailDbPerSecond: headphoneTailDbPerSecond,
                     bodyCalibrationGain: calibration.BodyGain,
@@ -775,14 +1026,22 @@ namespace GunsAreLoud.Client.Audio
 
             private static void StopChannel(
                 AudioSource source,
+                PitchedBandPassFilter band,
                 PitchedGunshotTailFilter tail,
                 PitchedGunshotEnvelopeFilter envelope)
             {
                 source.Stop();
                 source.loop = false;
                 source.clip = null;
+                band.Bypass();
                 tail.Bypass();
                 envelope.Bypass();
+                // Unity keeps calling the filters of an enabled source object and
+                // keeps it in the voice budget even when it plays nothing. A pool
+                // that has issued sixty-four copies would otherwise leave one
+                // hundred and twenty-eight live sources in the graph for the rest
+                // of the raid, competing with the game's own sounds.
+                source.gameObject.SetActive(false);
             }
         }
     }

@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Reflection;
 using Comfort.Common;
 using EFT;
@@ -10,17 +11,55 @@ namespace GunsAreLoud.Client.Runtime
 {
     internal static class ShotDescriptorFactory
     {
+        // A resolved field reference instead of FieldInfo.GetValue on the firing
+        // path. The field is declared as the bridge interface, not as the concrete
+        // PlayerBridge, and Harmony requires the exact declared type; the cast to
+        // the concrete bridge is the one the FieldInfo version also performed.
+        // Kept for a game build where the fast accessor cannot be built: local
+        // shots must keep working through plain reflection rather than stop.
         private static readonly FieldInfo PlayersBridgeField =
             AccessTools.Field(typeof(BaseSoundPlayer), "playersBridge");
+        private static readonly AccessTools.FieldRef<BaseSoundPlayer, BaseSoundPlayer.IObserverToPlayerBridge>
+            PlayersBridgeRef = ResolvePlayersBridge();
+
+        private static AccessTools.FieldRef<BaseSoundPlayer, BaseSoundPlayer.IObserverToPlayerBridge>
+            ResolvePlayersBridge()
+        {
+            FieldInfo field = PlayersBridgeField;
+            if (field == null)
+            {
+                Plugin.Log?.LogWarning(
+                    "local shot detection unavailable: BaseSoundPlayer.playersBridge is missing");
+                return null;
+            }
+            try
+            {
+                return AccessTools.FieldRefAccess<BaseSoundPlayer, BaseSoundPlayer.IObserverToPlayerBridge>(field);
+            }
+            catch (Exception error)
+            {
+                Plugin.Log?.LogWarning(
+                    "local shot detection falls back to reflection: " + error.Message);
+                return null;
+            }
+        }
 
         internal static bool CompatibilityAvailable => PlayersBridgeField != null;
+
+        /// <summary>True when the shot path avoids reflection entirely.</summary>
+        internal static bool FastBridgeAccessAvailable => PlayersBridgeRef != null;
+
+        private static BaseSoundPlayer.PlayerBridge Bridge(WeaponSoundPlayer soundPlayer)
+        {
+            if (soundPlayer == null) return null;
+            if (PlayersBridgeRef != null) return PlayersBridgeRef(soundPlayer) as BaseSoundPlayer.PlayerBridge;
+            return PlayersBridgeField?.GetValue(soundPlayer) as BaseSoundPlayer.PlayerBridge;
+        }
 
         internal static bool TryGetLocalBridge(WeaponSoundPlayer soundPlayer,
             out BaseSoundPlayer.PlayerBridge bridge)
         {
-            bridge = soundPlayer != null
-                ? PlayersBridgeField?.GetValue(soundPlayer) as BaseSoundPlayer.PlayerBridge
-                : null;
+            bridge = Bridge(soundPlayer);
             return bridge?._player != null && bridge._player.IsYourPlayer &&
                 bridge.PointOfView == EPointOfView.FirstPerson;
         }
@@ -34,12 +73,12 @@ namespace GunsAreLoud.Client.Runtime
         {
             descriptor = null;
 
-            if (soundPlayer == null || ammo == null || PlayersBridgeField == null)
+            if (soundPlayer == null || ammo == null)
             {
                 return false;
             }
 
-            var bridge = PlayersBridgeField.GetValue(soundPlayer) as BaseSoundPlayer.PlayerBridge;
+            BaseSoundPlayer.PlayerBridge bridge = Bridge(soundPlayer);
             if (bridge == null || bridge.PointOfView != EPointOfView.FirstPerson)
             {
                 return false;
@@ -68,16 +107,9 @@ namespace GunsAreLoud.Client.Runtime
                 }
             }
 
-            int summedModLoudness = 0;
-            foreach (Mod mod in weapon.Mods)
-            {
-                if (mod != null)
-                {
-                    summedModLoudness += mod.Loudness;
-                }
-            }
-
-            string weaponClass = weapon.Template?.weapClass ?? string.Empty;
+            WeaponAudioFacts facts = GetFacts(weapon);
+            int summedModLoudness = facts.SummedModLoudness;
+            string weaponClass = facts.WeaponClass;
             HeadphonesTemplate mixerHeadphones = Singleton<BetterAudio>.Instantiated &&
                 Singleton<BetterAudio>.Instance != null
                 ? Singleton<BetterAudio>.Instance.CurrentHeadphonesTemplate : null;
@@ -93,7 +125,7 @@ namespace GunsAreLoud.Client.Runtime
                 MuzzleVelocity = Mathf.Max(0f, weapon.TotalVelocity > 0f ? weapon.TotalVelocity : ammo.InitialSpeed),
                 ProjectileCount = Mathf.Max(1, ammo.ProjectileCount),
                 WeaponClass = weaponClass,
-                WeaponCategory = ClassifyWeapon(weaponClass),
+                WeaponCategory = facts.Category,
                 WeaponTemplateId = weapon.StringTemplateId ?? string.Empty,
                 IsSuppressed = soundPlayer.IsSilenced,
                 SummedModLoudness = summedModLoudness,
@@ -111,33 +143,82 @@ namespace GunsAreLoud.Client.Runtime
             return true;
         }
 
-        private static WeaponCategory ClassifyWeapon(string weaponClass)
+        /// <summary>
+        /// What a shot needs to know about the weapon itself, rather than about
+        /// this particular round. It changes only when the weapon is modified, so
+        /// it is resolved per weapon instance and re-read when the mod count does
+        /// not match what was cached.
+        /// </summary>
+        private sealed class WeaponAudioFacts
+        {
+            internal int ModCount;
+            internal int SummedModLoudness;
+            internal string WeaponClass;
+            internal WeaponCategory Category;
+        }
+
+        private static readonly ConditionalWeakTable<Weapon, WeaponAudioFacts> Facts =
+            new ConditionalWeakTable<Weapon, WeaponAudioFacts>();
+
+        private static WeaponAudioFacts GetFacts(Weapon weapon)
+        {
+            int modCount = 0;
+            int summedModLoudness = 0;
+            foreach (Mod mod in weapon.Mods)
+            {
+                modCount++;
+                if (mod != null) summedModLoudness += mod.Loudness;
+            }
+
+            if (Facts.TryGetValue(weapon, out WeaponAudioFacts cached) &&
+                cached.ModCount == modCount &&
+                cached.SummedModLoudness == summedModLoudness)
+                return cached;
+
+            string weaponClass = weapon.Template?.weapClass ?? string.Empty;
+            var facts = new WeaponAudioFacts
+            {
+                ModCount = modCount,
+                SummedModLoudness = summedModLoudness,
+                WeaponClass = weaponClass,
+                Category = ClassifyWeapon(weaponClass)
+            };
+            if (cached != null) Facts.Remove(weapon);
+            Facts.Add(weapon, facts);
+            return facts;
+        }
+
+        // Case-insensitive comparison instead of a lowered copy: the class string
+        // came from the template and is re-read for every shot.
+        private static bool Contains(string value, string token) =>
+            value.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
+
+        internal static WeaponCategory ClassifyWeapon(string weaponClass)
         {
             if (string.IsNullOrEmpty(weaponClass))
             {
                 return WeaponCategory.Unknown;
             }
 
-            string value = weaponClass.ToLowerInvariant();
-            if (value.Contains("pistol") || value.Contains("revolver"))
+            if (Contains(weaponClass, "pistol") || Contains(weaponClass, "revolver"))
             {
                 return WeaponCategory.Pistol;
             }
 
-            if (value.Contains("smg") || value.Contains("pdw"))
+            if (Contains(weaponClass, "smg") || Contains(weaponClass, "pdw"))
             {
                 return WeaponCategory.Compact;
             }
 
-            if (value.Contains("grenade") || value.Contains("special"))
+            if (Contains(weaponClass, "grenade") || Contains(weaponClass, "special"))
             {
                 return WeaponCategory.Heavy;
             }
 
-            if (value.Contains("rifle") ||
-                value.Contains("carbine") ||
-                value.Contains("shotgun") ||
-                value.Contains("machinegun"))
+            if (Contains(weaponClass, "rifle") ||
+                Contains(weaponClass, "carbine") ||
+                Contains(weaponClass, "shotgun") ||
+                Contains(weaponClass, "machinegun"))
             {
                 return WeaponCategory.LongGun;
             }

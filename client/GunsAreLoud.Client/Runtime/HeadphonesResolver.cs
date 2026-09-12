@@ -17,12 +17,40 @@ namespace GunsAreLoud.Client.Runtime
 
     internal static class HeadphonesResolver
     {
+        // The headwear branch walks a collection, and this is asked once per shot
+        // and five times a second by the route poll. EFT applies a headset template
+        // whenever the worn set changes, which invalidates this; the short expiry
+        // is the backstop for any equip path that does not.
+        private const float CacheSeconds = 0.5f;
+        private static InventoryEquipment _cachedEquipment;
+        private static Headphones _cachedItem;
+        private static float _cacheExpiry;
+
+        internal static void Invalidate()
+        {
+            _cachedEquipment = null;
+            _cachedItem = null;
+            _cacheExpiry = 0f;
+        }
+
         internal static HeadphonesTemplate FindEquipped(InventoryEquipment equipment)
             => FindEquippedItem(equipment)?.Template;
 
         internal static Headphones FindEquippedItem(InventoryEquipment equipment)
         {
             if (equipment == null) return null;
+            if (ReferenceEquals(equipment, _cachedEquipment) &&
+                UnityEngine.Time.unscaledTime < _cacheExpiry)
+                return _cachedItem;
+            Headphones resolved = Resolve(equipment);
+            _cachedEquipment = equipment;
+            _cachedItem = resolved;
+            _cacheExpiry = UnityEngine.Time.unscaledTime + CacheSeconds;
+            return resolved;
+        }
+
+        private static Headphones Resolve(InventoryEquipment equipment)
+        {
             if (equipment.GetSlot(EquipmentSlot.Earpiece)?.ContainedItem is Headphones earpiece)
                 return earpiece;
             // Same slots and precedence as EFT.Player.UpdatePhonesReally. Never

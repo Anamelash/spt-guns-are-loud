@@ -271,14 +271,15 @@ namespace GunsAreLoud.Tests
                 .Count(field => field.FieldType.IsGenericType &&
                                 field.FieldType.GetGenericTypeDefinition() == typeof(ConfigEntry<>));
 
-            Assert.That(configEntryFields, Is.EqualTo(34));
+            // 36 as of the 1.0.2 clean-up, plus the two hearing switches in General,
+            // minus Low-End Method: the pitched copy is the only low-end path.
+            Assert.That(configEntryFields, Is.EqualTo(37));
             Assert.That(_config.HeadphoneMode, Is.Not.Null);
             Assert.That(_config.GunshotContrastDb, Is.Not.Null);
-            Assert.That(_config.IndoorHeadphonesDampingPercent, Is.Not.Null);
-            Assert.That(_config.LowEndNormalizationPercent, Is.Not.Null);
-            Assert.That(_config.CaliberContrastPercent, Is.Not.Null);
+            Assert.That(_config.LowEndNormalizationDb, Is.Not.Null);
+            Assert.That(_config.CartridgeContrastDb, Is.Not.Null);
             Assert.That(_config.AutomaticTailMode, Is.Not.Null);
-            Assert.That(_config.LowEndMode, Is.Not.Null);
+            Assert.That(_config.AutomaticReportOverlapShots, Is.Not.Null);
             Assert.That(_config.AutomaticPitchedRoute, Is.Not.Null);
             Assert.That(_config.PitchedLayerSemitones, Is.Not.Null);
             Assert.That(_config.PitchedLayerHighpassHz, Is.Not.Null);
@@ -288,6 +289,7 @@ namespace GunsAreLoud.Tests
             Assert.That(_config.PitchedLayerGainDb, Is.Not.Null);
             Assert.That(_config.PitchedLayerOcclusion, Is.Not.Null);
             Assert.That(_config.PitchedLayerOccludedLowpassHz, Is.Not.Null);
+            Assert.That(_config.PerformanceSummaryLog, Is.Not.Null);
         }
 
         [Test]
@@ -303,19 +305,19 @@ namespace GunsAreLoud.Tests
             Assert.That(_config.EarDifference.Value, Is.EqualTo(140f).Within(0.0001f));
             Assert.That(_config.HeadphoneMode.Value, Is.EqualTo(HeadphoneMode.Realistic));
             Assert.That(_config.HeadphonesFit.Value, Is.EqualTo(HeadphonesFitPreset.Tight));
-            Assert.That(_config.LowEndMode.Value, Is.EqualTo(GunshotLowEndMode.PitchedCopy));
             Assert.That(_config.AutomaticPitchedRoute.Value, Is.EqualTo(AutomaticPitchedRoute.CachedReport));
             Assert.That(_config.AutomaticTailMode.Value, Is.EqualTo(AutomaticTailMode.FullReportPerShot));
+            Assert.That(_config.AutomaticReportOverlapShots.Value, Is.EqualTo(6f).Within(0.0001f));
             Assert.That(_config.PitchedLayerSemitones.Value, Is.EqualTo(12f).Within(0.0001f));
-            Assert.That(_config.LowEndNormalizationPercent.Value, Is.EqualTo(100f));
-            Assert.That(_config.CaliberContrastPercent.Value, Is.EqualTo(200f));
+            Assert.That(_config.LowEndNormalizationDb.Value, Is.EqualTo(12f));
+            Assert.That(_config.CartridgeContrastDb.Value, Is.EqualTo(6f));
             Assert.That(_config.PitchedLayerLowpassHz.Value, Is.EqualTo(2000f));
-            Assert.That(_config.PitchedLayerHighpassHz.Value, Is.EqualTo(10.00001f).Within(0.0001f));
+            Assert.That(_config.PitchedLayerHighpassHz.Value, Is.EqualTo(10f).Within(0.0001f));
             Assert.That(_config.PitchedLayerFadePercent.Value, Is.EqualTo(50f).Within(0.0001f));
             Assert.That(_config.AutomaticPitchedTailMs.Value, Is.EqualTo(30f));
             Assert.That(_config.PitchedLayerGainDb.Value, Is.EqualTo(20f).Within(0.0001f));
             Assert.That(_config.PitchedLayerOcclusion.Value, Is.EqualTo(PitchedLayerOcclusionMode.Inherit));
-            Assert.That(_config.PitchedLayerOccludedLowpassHz.Value, Is.EqualTo(500.4695f).Within(0.0001f));
+            Assert.That(_config.PitchedLayerOccludedLowpassHz.Value, Is.EqualTo(500f).Within(0.0001f));
             Assert.That(_config.HearingLossDuration.Value, Is.EqualTo(100f));
             Assert.That(_config.RingingDuration.Value, Is.EqualTo(100f));
             Assert.That(_config.BlastHearingStrength.Value, Is.EqualTo(100f));
@@ -325,8 +327,8 @@ namespace GunsAreLoud.Tests
             Assert.That(_config.BlastSevereDuration.Value, Is.EqualTo(180f));
             Assert.That(_config.BlastRadius.Value, Is.EqualTo(5f));
             Assert.That(_config.BlastIndoorScale.Value, Is.EqualTo(3f));
-            Assert.That(_config.IndoorHeadphonesDampingPercent.Value, Is.EqualTo(100f));
-            Assert.That(_config.DiagnosticShotLog.Value, Is.True);
+            Assert.That(_config.PerformanceSummaryLog.Value, Is.False);
+            Assert.That(_config.DiagnosticShotLog.Value, Is.False);
         }
 
         [Test]
@@ -334,12 +336,11 @@ namespace GunsAreLoud.Tests
         {
             ConfigEntryBase[] advanced =
             {
-                _config.LowEndMode,
                 _config.AutomaticPitchedRoute,
                 _config.AutomaticTailMode,
                 _config.PitchedLayerSemitones,
-                _config.LowEndNormalizationPercent,
-                _config.CaliberContrastPercent,
+                _config.LowEndNormalizationDb,
+                _config.CartridgeContrastDb,
                 _config.PitchedLayerLowpassHz,
                 _config.PitchedLayerHighpassHz,
                 _config.PitchedLayerFadePercent,
@@ -347,6 +348,7 @@ namespace GunsAreLoud.Tests
                 _config.PitchedLayerGainDb,
                 _config.PitchedLayerOcclusion,
                 _config.PitchedLayerOccludedLowpassHz,
+                _config.PerformanceSummaryLog,
                 _config.DiagnosticShotLog
             };
 
@@ -445,7 +447,6 @@ namespace GunsAreLoud.Tests
 
             Assert.That(boost, Is.EqualTo(0f));
             Assert.That(tuning.DirectBodyGain, Is.EqualTo(0f));
-            Assert.That(LocalGunshotImpactFilter.CalculateBodyBandGain(tuning.DirectBodyGain, frequency), Is.EqualTo(0f));
         }
 
         [Test]
@@ -455,7 +456,6 @@ namespace GunsAreLoud.Tests
                 6f,
                 0.2f,
                 90f,
-                GunshotLowEndMode.OriginalBand,
                 AutomaticPitchedRoute.CachedReport,
                 12f,
                 35f,
@@ -487,7 +487,6 @@ namespace GunsAreLoud.Tests
         [Test]
         public void PitchedLowEndSettingsAreExposedThroughTuningSnapshot()
         {
-            _config.LowEndMode.Value = GunshotLowEndMode.PitchedCopy;
             _config.AutomaticPitchedRoute.Value = AutomaticPitchedRoute.BuiltInDSP;
             _config.PitchedLayerSemitones.Value = 9f;
             _config.PitchedLayerHighpassHz.Value = 42f;
@@ -500,7 +499,6 @@ namespace GunsAreLoud.Tests
 
             TuningSnapshot tuning = _config.GetTuning();
 
-            Assert.That(tuning.LowEndMode, Is.EqualTo(GunshotLowEndMode.PitchedCopy));
             Assert.That(tuning.AutomaticPitchedRoute, Is.EqualTo(AutomaticPitchedRoute.BuiltInDSP));
             Assert.That(tuning.PitchedLayerSemitones, Is.EqualTo(9f));
             Assert.That(tuning.PitchedLayerHighpassHz, Is.EqualTo(42f));
@@ -542,6 +540,35 @@ namespace GunsAreLoud.Tests
 
             Assert.That(oneShot, Is.EqualTo(0.42f).Within(0.0001f));
             Assert.That(automaticBeat, Is.EqualTo(0.075f).Within(0.0001f));
+        }
+
+        /// <summary>
+        /// The window EFT reserves for a sample says when it means to be done with
+        /// it, not how long the recording is. For some tails it reserves seconds
+        /// against a recording of about one, and the copy — which only reproduces
+        /// that recording, pitched down — must not be stretched to fill it.
+        /// </summary>
+        [Test]
+        public void ACopyLastsAsLongAsTheRecordingNotAsLongAsTheReservedWindow()
+        {
+            float overreserved = PitchedGunshotLayer.CalculateOriginalDuration(
+                10.0, 19.9, 0f, clipLength: 1.2f, samplePitch: 1f);
+            Assert.That(overreserved, Is.EqualTo(1.2f).Within(0.0001f));
+
+            // A window shorter than the recording still wins: the game stopped it.
+            float cutShort = PitchedGunshotLayer.CalculateOriginalDuration(
+                10.0, 10.4, 0f, clipLength: 1.2f, samplePitch: 1f);
+            Assert.That(cutShort, Is.EqualTo(0.4f).Within(0.0001f));
+
+            // A faster sample is a shorter recording.
+            float pitchedUp = PitchedGunshotLayer.CalculateOriginalDuration(
+                10.0, 19.9, 0f, clipLength: 1.2f, samplePitch: 2f);
+            Assert.That(pitchedUp, Is.EqualTo(0.6f).Within(0.0001f));
+
+            // Nothing known about the clip leaves the window as the only measure.
+            float unknownClip = PitchedGunshotLayer.CalculateOriginalDuration(
+                10.0, 10.42, 0f, clipLength: 0f, samplePitch: 1f);
+            Assert.That(unknownClip, Is.EqualTo(0.42f).Within(0.0001f));
         }
 
         [Test]
@@ -616,7 +643,7 @@ namespace GunsAreLoud.Tests
             pcm[80] = 0.01f;
             pcm[100] = 0.5f;
 
-            int onset = AutomaticBeatClipCache.FindOnsetFrame(
+            int onset = AutomaticCopyCache.FindOnsetFrame(
                 pcm,
                 100,
                 2,
@@ -701,38 +728,6 @@ namespace GunsAreLoud.Tests
         }
 
         [Test]
-        public void ClipDerivedBodyEnvelopeStartsAndEndsAtZeroAndBoundsTheMix()
-        {
-            float envelopeStart = LocalGunshotImpactFilter.CalculateBodyEnvelope(0, 48000);
-            float envelopeBody = LocalGunshotImpactFilter.CalculateBodyEnvelope(120, 48000);
-            float envelopeEnd = LocalGunshotImpactFilter.CalculateBodyEnvelope(5760, 48000);
-            float positivePeak = LocalGunshotImpactFilter.MixBounded(0.9f, 0.5f);
-            float negativePeak = LocalGunshotImpactFilter.MixBounded(-0.9f, -0.5f);
-
-            Assert.That(envelopeStart, Is.EqualTo(0f).Within(0.000001f));
-            Assert.That(envelopeBody, Is.GreaterThan(0.5f));
-            Assert.That(envelopeEnd, Is.EqualTo(0f));
-            Assert.That(positivePeak, Is.GreaterThan(0.9f));
-            Assert.That(positivePeak, Is.LessThanOrEqualTo(1f));
-            Assert.That(negativePeak, Is.LessThan(-0.9f));
-            Assert.That(negativePeak, Is.GreaterThanOrEqualTo(-1f));
-        }
-
-        [Test]
-        public void ClipDerivedBodyHasNoFixedPitchAndGrowsWithCaliber()
-        {
-            float rifleGain = LocalGunshotImpactFilter.CalculateBodyBandGain(0.48f, 99f);
-            float heavyGain = LocalGunshotImpactFilter.CalculateBodyBandGain(0.48f, 68f);
-            float rifleCutoff = LocalGunshotImpactFilter.CalculateBodyUpperCutoff(99f);
-            float heavyCutoff = LocalGunshotImpactFilter.CalculateBodyUpperCutoff(68f);
-
-            Assert.That(rifleGain, Is.GreaterThan(1f));
-            Assert.That(heavyGain, Is.GreaterThan(rifleGain));
-            Assert.That(heavyCutoff, Is.LessThan(rifleCutoff));
-            Assert.That(heavyCutoff, Is.EqualTo(170f));
-        }
-
-        [Test]
         public void LargerCaliberUsesLowerPressureFrequency()
         {
             ShotDescriptor rifle = CreateShot();
@@ -749,9 +744,6 @@ namespace GunsAreLoud.Tests
 
             Assert.That(heavyFrequency, Is.LessThan(rifleFrequency));
             Assert.That(heavyFrequency, Is.InRange(68f, 122f));
-            Assert.That(
-                LocalGunshotImpactFilter.CalculateBodyUpperCutoff(heavyFrequency),
-                Is.LessThan(LocalGunshotImpactFilter.CalculateBodyUpperCutoff(rifleFrequency)));
         }
 
         [Test]
@@ -782,11 +774,8 @@ namespace GunsAreLoud.Tests
 
             float boost = DirectLoudnessModel.CalculateBoostDb(shot, exposure, tuning);
             float frequency = DirectLoudnessModel.CalculatePressureFrequencyHz(exposure, tuning);
-            float bodyBandGain = LocalGunshotImpactFilter.CalculateBodyBandGain(0.5f, frequency);
 
             Assert.That(boost, Is.EqualTo(6.5f));
-            Assert.That(bodyBandGain, Is.GreaterThan(1.5f));
-            Assert.That(bodyBandGain, Is.LessThanOrEqualTo(2.08f).Within(0.0001f));
         }
 
         private static ShotDescriptor CreateShot()

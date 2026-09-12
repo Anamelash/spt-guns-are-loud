@@ -30,7 +30,6 @@ namespace GunsAreLoud.Tests
         public void OutdoorsOrNoHeadphonesAreExactlyNeutral(bool indoor, bool headphones)
         {
             _shot.IsIndoor = indoor; _shot.HasActiveHeadphones = headphones;
-            _config.IndoorHeadphonesDampingPercent.Value = 200;
             AssertNeutral(IndoorHeadphonesModel.Calculate(_shot, _config.GetTuning()));
         }
 
@@ -41,16 +40,6 @@ namespace GunsAreLoud.Tests
             Assert.That(d.EarlyAttenuationDb, Is.Zero);
             Assert.That(d.ReverbAttenuationDb, Is.Zero);
             Assert.That(d.ReachMultiplier, Is.EqualTo(1));
-        }
-
-        [TestCase(0)]
-        [TestCase(100)]
-        [TestCase(200)]
-        public void LegacyControlIsNeutralAtEveryStoredValue(int percent)
-        {
-            _config.IndoorHeadphonesDampingPercent.Value = percent;
-            var d = IndoorHeadphonesModel.Calculate(_shot, _config.GetTuning());
-            AssertNeutral(d);
         }
 
         [Test]
@@ -67,30 +56,6 @@ namespace GunsAreLoud.Tests
         }
 
         [Test]
-        public void LegacyValueIsPreservedButInactive()
-        {
-            TuningSnapshot before = _config.GetTuning();
-            Assert.That(before.IndoorHeadphonesDampingPercent, Is.EqualTo(100));
-            _config.IndoorHeadphonesDampingPercent.Value = 999;
-            TuningSnapshot after = _config.GetTuning();
-            Assert.That(after.IndoorHeadphonesDampingPercent, Is.EqualTo(200));
-            Assert.That(after.PitchedLayerFadePercent, Is.EqualTo(before.PitchedLayerFadePercent));
-            Assert.That(after.PitchedLayerGainDb, Is.EqualTo(before.PitchedLayerGainDb));
-            Assert.That(after.PitchedLayerSemitones, Is.EqualTo(before.PitchedLayerSemitones));
-            Assert.That(after.MasterSeverityScale, Is.EqualTo(before.MasterSeverityScale));
-            _config.IndoorHeadphonesDampingPercent.Value = 0;
-            AssertNeutral(IndoorHeadphonesModel.Calculate(_shot, _config.GetTuning()));
-        }
-
-        [Test]
-        public void LegacyControlIsHiddenFromConfigurationManager()
-        {
-            object[] tags = _config.IndoorHeadphonesDampingPercent.Description.Tags;
-            Assert.That(tags, Has.Some.Matches<object>(tag =>
-                tag.GetType().GetField("Browsable")?.GetValue(tag) is bool visible && !visible));
-        }
-
-        [Test]
         public void HeadphoneSignalChainUsesTunedRealisticDefault()
         {
             TuningSnapshot tuning = _config.GetTuning();
@@ -100,9 +65,8 @@ namespace GunsAreLoud.Tests
         }
 
         [Test]
-        public void SwitchingHeadphoneModePreservesLegacyValuesAndUnrelatedGunTuning()
+        public void SwitchingHeadphoneModePreservesUnrelatedGunTuning()
         {
-            _config.IndoorHeadphonesDampingPercent.Value = 173f;
             _config.PitchedLayerGainDb.Value = 11.5f;
             _config.HeadphonesFit.Value = HeadphonesFitPreset.Loose;
             TuningSnapshot vanilla = _config.GetTuning();
@@ -114,8 +78,6 @@ namespace GunsAreLoud.Tests
 
             Assert.That(realistic.HeadphoneMode, Is.EqualTo(HeadphoneMode.Realistic));
             Assert.That(restored.HeadphoneMode, Is.EqualTo(HeadphoneMode.Vanilla));
-            Assert.That(restored.IndoorHeadphonesDampingPercent,
-                Is.EqualTo(vanilla.IndoorHeadphonesDampingPercent));
             Assert.That(restored.PitchedLayerGainDb, Is.EqualTo(vanilla.PitchedLayerGainDb));
             Assert.That(restored.HeadphonesFitOffsetDb, Is.EqualTo(vanilla.HeadphonesFitOffsetDb));
         }

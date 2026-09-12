@@ -76,6 +76,13 @@ namespace GunsAreLoud.Client.Runtime
                 tinnitus ? MapTinnitus(normalizedRight, tuning) : 0f);
         }
 
+        // The loudest ringing gunfire can reach with these settings: the level at
+        // maximum dose, or zero when gunshot ringing is disabled.
+        internal static float TinnitusCeiling(TuningSnapshot tuning) =>
+            tuning != null && tuning.ExposureEnabled && tuning.TinnitusEnabled
+                ? Math.Max(0f, tuning.TinnitusMaximumLevel)
+                : 0f;
+
         private static float MapHearingLoss(float normalizedDose, TuningSnapshot tuning)
         {
             float duration = Math.Max(0.05f, tuning.HearingLossDurationScale);

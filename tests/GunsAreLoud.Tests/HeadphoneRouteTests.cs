@@ -119,7 +119,7 @@ namespace GunsAreLoud.Tests
             var route = new TransactionalMixerHeadphoneRoute(store, 48000, ImmediateFitProvider.Instance);
             Assert.That(HeadsetProfileRegistry.TryGet(Sordin, out HeadsetProfile profile), Is.True);
 
-            Assert.That(route.TryActivate(profile, out string reason), Is.False);
+            Assert.That(route.TryActivate(profile, HeadsetSendLevels.Neutral, out string reason), Is.False);
             Assert.That(reason, Does.Contain(TransactionalMixerHeadphoneRoute.PassiveMidGain));
             Assert.That(store.WriteCount, Is.Zero);
         }
@@ -131,7 +131,7 @@ namespace GunsAreLoud.Tests
             var route = new TransactionalMixerHeadphoneRoute(store, 48000, PendingFitProvider.Instance);
             Assert.That(HeadsetProfileRegistry.TryGet(Sordin, out HeadsetProfile profile), Is.True);
 
-            Assert.That(route.TryActivate(profile, out string reason), Is.False);
+            Assert.That(route.TryActivate(profile, HeadsetSendLevels.Neutral, out string reason), Is.False);
             Assert.That(reason, Is.EqualTo("profile-fit-pending"));
             Assert.That(store.Values, Is.Empty);
             Assert.That(store.WriteCount, Is.Zero);
@@ -144,7 +144,7 @@ namespace GunsAreLoud.Tests
             var route = new TransactionalMixerHeadphoneRoute(store, 48000, ImmediateFitProvider.Instance);
             Assert.That(HeadsetProfileRegistry.TryGet(Sordin, out HeadsetProfile profile), Is.True);
 
-            Assert.That(route.TryActivate(profile, out _), Is.False);
+            Assert.That(route.TryActivate(profile, HeadsetSendLevels.Neutral, out _), Is.False);
             foreach (KeyValuePair<string, float> item in store.Original)
                 Assert.That(store.Values[item.Key], Is.EqualTo(item.Value), item.Key);
         }
@@ -184,13 +184,109 @@ namespace GunsAreLoud.Tests
             var store = new MixerStore();
             var route = new TransactionalMixerHeadphoneRoute(store, 48000, ImmediateFitProvider.Instance);
             Assert.That(HeadsetProfileRegistry.TryGet(Sordin, out HeadsetProfile profile), Is.True);
-            Assert.That(route.TryActivate(profile, out _), Is.True);
+            Assert.That(route.TryActivate(profile, HeadsetSendLevels.Neutral, out _), Is.True);
             store.FailOnce = TransactionalMixerHeadphoneRoute.PassiveVolume;
 
             Assert.That(route.TryRestore(out _), Is.False);
             Assert.That(route.TryRestore(out _), Is.True);
             foreach (KeyValuePair<string, float> item in store.Original)
                 Assert.That(store.Values[item.Key], Is.EqualTo(item.Value), item.Key);
+        }
+
+        private static readonly string[] StockSendNames =
+        {
+            "GunsCompressorSendLevel", "ClientPlayerCompressorSendLevel", "ObservedPlayerCompressorSendLevel",
+            "NpcCompressorSendLevel", "EnvTechnicalCompressorSendLevel", "EnvNatureCompressorSendLevel",
+            "EnvCommonCompressorSendLevel", "AmbientCompressorSendLevel", "EffectsReturnsCompressorSendLevel"
+        };
+
+        private static EFT.InventoryLogic.HeadphonesTemplate WornComTac() =>
+            new EFT.InventoryLogic.HeadphonesTemplate
+            {
+                ShortName = "ComTac2",
+                GunsCompressorSendLevel = -7f,
+                ClientPlayerCompressorSendLevel = -3f,
+                ObservedPlayerCompressorSendLevel = -1f,
+                NpcCompressorSendLevel = 0f,
+                EnvTechnicalCompressorSendLevel = -9f,
+                EnvNatureCompressorSendLevel = -6f,
+                EnvCommonCompressorSendLevel = -8f,
+                AmbientCompressorSendLevel = -12.5f,
+                EffectsReturnsCompressorSendLevel = -80f
+            };
+
+        [Test]
+        public void ElectronicsSendsComeFromTheWornHeadsetWhileEftStillAppliesDefault()
+        {
+            // EFT has not applied the headset yet: its live mixer still holds the
+            // no-headset Default, which sends nothing to any category.
+            var store = new MixerStore();
+            foreach (string name in StockSendNames) store.Values[name] = -80f;
+
+            var route = new TransactionalMixerHeadphoneRoute(store, 48000, ImmediateFitProvider.Instance);
+            Assert.That(HeadsetProfileRegistry.TryGet(Sordin, out HeadsetProfile profile), Is.True);
+            Assert.That(route.TryActivate(profile, HeadsetSendLevels.From(WornComTac()), out string reason),
+                Is.True, reason);
+
+            Assert.That(store.Values["GAL_ElectronicsGunsSend"], Is.EqualTo(-7f));
+            Assert.That(store.Values["GAL_ElectronicsClientPlayerSend"], Is.EqualTo(-3f));
+            Assert.That(store.Values["GAL_ElectronicsObservedPlayerSend"], Is.EqualTo(-1f));
+            Assert.That(store.Values["GAL_ElectronicsNpcSend"], Is.EqualTo(0f));
+            Assert.That(store.Values["GAL_ElectronicsEnvTechnicalSend"], Is.EqualTo(-9f));
+            Assert.That(store.Values["GAL_ElectronicsEnvNatureSend"], Is.EqualTo(-6f));
+            Assert.That(store.Values["GAL_ElectronicsEnvCommonSend"], Is.EqualTo(-8f));
+            Assert.That(store.Values["GAL_ElectronicsAmbientSend"], Is.EqualTo(-12.5f));
+            Assert.That(store.Values["GAL_ElectronicsEffectsReturnsSend"], Is.EqualTo(-80f),
+                "a category the headset deliberately mutes stays muted");
+            foreach (string name in StockSendNames)
+                Assert.That(store.Values[name], Is.EqualTo(-80f), name + " belongs to EFT and must stay untouched");
+        }
+
+        [Test]
+        public void TemplateWithoutSendDataKeepsTheElectronicPathAudible()
+        {
+            // A clone without send fields inherits -80 on every category, and a
+            // missing item has no template. Neither may silence the electronics.
+            Assert.That(HeadsetSendLevels.From(new EFT.InventoryLogic.HeadphonesTemplate()),
+                Is.EqualTo(HeadsetSendLevels.Neutral));
+            Assert.That(HeadsetSendLevels.From(null), Is.EqualTo(HeadsetSendLevels.Neutral));
+
+            var store = new MixerStore();
+            var route = new TransactionalMixerHeadphoneRoute(store, 48000, ImmediateFitProvider.Instance);
+            Assert.That(HeadsetProfileRegistry.TryGet(Sordin, out HeadsetProfile profile), Is.True);
+            Assert.That(route.TryActivate(profile,
+                HeadsetSendLevels.From(new EFT.InventoryLogic.HeadphonesTemplate()), out string reason), Is.True, reason);
+            Assert.That(store.Values["GAL_ElectronicsGunsSend"], Is.EqualTo(0f));
+            Assert.That(store.Values["GAL_ElectronicsAmbientSend"], Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void NonFiniteOrOutOfRangeSendLevelIsBounded()
+        {
+            var levels = new HeadsetSendLevels(float.NaN, float.PositiveInfinity, -120f, 40f, 0f, 0f, 0f, 0f, 0f);
+            Assert.That(levels.Guns, Is.EqualTo(0f));
+            Assert.That(levels.ClientPlayer, Is.EqualTo(0f));
+            Assert.That(levels.ObservedPlayer, Is.EqualTo(-80f));
+            Assert.That(levels.Npc, Is.EqualTo(20f));
+        }
+
+        [Test]
+        public void SameProfileReactivatesOnlyWhenTheWornCategoryMixChanges()
+        {
+            var backend = new Backend();
+            var controller = new HeadphoneRouteController(backend);
+            HeadsetSendLevels first = HeadsetSendLevels.From(WornComTac());
+            EFT.InventoryLogic.HeadphonesTemplate variant = WornComTac();
+            variant.AmbientCompressorSendLevel = -8f;
+            HeadsetSendLevels second = HeadsetSendLevels.From(variant);
+
+            Assert.That(controller.Apply(HeadphoneMode.Realistic, Sordin, false, first), Is.True);
+            Assert.That(controller.Apply(HeadphoneMode.Realistic, Sordin, false, first), Is.True);
+            Assert.That(backend.Activations, Is.EqualTo(1), "an unchanged mix must not rewrite the mixer every poll");
+
+            Assert.That(controller.Apply(HeadphoneMode.Realistic, Sordin, false, second), Is.True);
+            Assert.That(backend.Activations, Is.EqualTo(2), "a variant sharing the profile must get its own mix");
+            Assert.That(backend.LastSends, Is.EqualTo(second));
         }
 
         [TestCase("GAL_ElectronicsWet", 0f)]
@@ -201,7 +297,7 @@ namespace GunsAreLoud.Tests
             var store = new MixerStore();
             var route = new TransactionalMixerHeadphoneRoute(store, 48000, ImmediateFitProvider.Instance);
             Assert.That(HeadsetProfileRegistry.TryGet(Sordin, out HeadsetProfile profile), Is.True);
-            Assert.That(route.TryActivate(profile, out _), Is.True);
+            Assert.That(route.TryActivate(profile, HeadsetSendLevels.Neutral, out _), Is.True);
             Assert.That(route.VerifyActive(out _), Is.True);
             int writes = store.WriteCount;
             store.Values[parameter] = value;
@@ -217,8 +313,9 @@ namespace GunsAreLoud.Tests
             internal int Activations, Restores;
             internal bool FailNextRestore;
             internal string ActivationReason = "";
-            public bool TryActivate(HeadsetProfile profile, out string reason)
-            { Activations++; reason = ActivationReason; return string.IsNullOrEmpty(reason); }
+            internal HeadsetSendLevels LastSends;
+            public bool TryActivate(HeadsetProfile profile, HeadsetSendLevels sends, out string reason)
+            { Activations++; LastSends = sends; reason = ActivationReason; return string.IsNullOrEmpty(reason); }
             public bool TryRestore(out string reason)
             {
                 Restores++;

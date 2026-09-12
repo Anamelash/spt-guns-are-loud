@@ -35,12 +35,21 @@ namespace GunsAreLoud.Client.Audio
             _eligible = eligible;
         }
 
+        private void Awake() => GalSourceCensus.Created(GalComponentKind.ContrastFilter);
+
         private void OnEnable()
         {
+            GalSourceCensus.Enabled(GalComponentKind.ContrastFilter);
             if (_state != null) GunshotContrastController.Instance?.RefreshSource(GetComponent<AudioSource>());
         }
 
-        private void OnDisable() { _eligible = false; _gain = 1f; _previousBuffer = null; }
+        private void OnDisable()
+        {
+            GalSourceCensus.Disabled(GalComponentKind.ContrastFilter);
+            _eligible = false; _gain = 1f; _previousBuffer = null;
+        }
+
+        private void OnDestroy() => GalSourceCensus.Destroyed(GalComponentKind.ContrastFilter);
 
         private void OnAudioFilterRead(float[] data, int channels)
         {
@@ -52,7 +61,7 @@ namespace GunsAreLoud.Client.Audio
                 GunshotContrastModel.Apply(data, gain);
                 Interlocked.Increment(ref _callbacks);
             }
-            if (diagnostic) PerformanceTrace.RecordAudio(data, ref _previousBuffer, start);
+            if (diagnostic) PerformanceTrace.RecordAudio(data, channels, ref _previousBuffer, start);
             else _previousBuffer = null;
         }
     }

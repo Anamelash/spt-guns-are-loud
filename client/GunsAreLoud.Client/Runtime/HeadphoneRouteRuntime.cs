@@ -28,7 +28,11 @@ namespace GunsAreLoud.Client.Runtime
         private bool _dirty = true;
         private bool _nativeUpdate;
         private object _nativeController;
-        private string _lastStatus = "";
+        private HeadphoneRouteStatus _lastStatusValue;
+        private HeadsetSendLevels _lastSends;
+        private bool _lastTransition;
+        private bool _hasStatus;
+        private float _nextFadePoll;
         private float _tinnitusRepairAt;
         private bool _tinnitusRepairPending;
 
@@ -53,18 +57,69 @@ namespace GunsAreLoud.Client.Runtime
             _config = config;
             _config.HeadphoneMode.SettingChanged += OnModeChanged;
             _config.Enabled.SettingChanged += OnModeChanged;
+            // Any F12 change, not only this route's own: a mixer parameter is the
+            // one piece of state that outlives a raid and shows up nowhere else,
+            // so a setting that moves one and fails to move it back is invisible.
+            // Recording every owned parameter on both sides of a change is what
+            // makes that difference readable instead of guessed at.
+            _config.Source.SettingChanged += OnAnySettingChanged;
             HeadphoneNativeEqCache.PreloadAll(AudioSettings.outputSampleRate);
         }
 
         private void OnModeChanged(object sender, EventArgs args) { _dirty = true; }
 
+        private void OnAnySettingChanged(object sender, SettingChangedEventArgs args)
+        {
+            if (_backend == null) return;
+            string key = args?.ChangedSetting?.Definition?.Key ?? "unknown";
+            LogOwnedMixerParameters("before " + key);
+            _pendingParameterDump = key;
+            _parameterDumpFrame = Time.frameCount + 2;
+        }
+
+        private void LogOwnedMixerParameters(string when)
+        {
+            if (_backend == null) return;
+            if (!DetailedDiagnostics.TryBegin(
+                DiagnosticEventKind.MixerSnapshot, out DiagnosticReservation reservation)) return;
+            // Both systems that write this mixer, in one line: the headset route
+            // and the gunshot contrast. Either can leave a value behind.
+            string contrast = HeadphoneMixerAsset.ContrastRoutes?.DescribeLiveParameters() ?? "contrast=none";
+            DetailedDiagnostics.Commit(
+                reservation,
+                $"mixer parameters {when}: route[{_backend.DescribeLiveParameters()}] " +
+                $"contrast[{contrast}]");
+        }
+
+        private string _pendingParameterDump;
+        private int _parameterDumpFrame = -1;
+
         private void Update()
         {
+            using (PerformanceTrace.Measure(PerformanceArea.HeadphoneRoute)) Tick();
+        }
+
+        private void Tick()
+        {
+            // A couple of frames after the change, so every ramp the setting
+            // started has been applied and the comparison is like for like.
+            if (_pendingParameterDump != null && Time.frameCount >= _parameterDumpFrame)
+            {
+                LogOwnedMixerParameters("after " + _pendingParameterDump);
+                _pendingParameterDump = null;
+            }
             HeadphoneMixerAsset.SyncGlobalControls();
             _smoothStore?.Tick(Time.unscaledDeltaTime);
             RepairAfterTinnitusIfDue();
-            if (_nativeUpdate && (NativeFadeIsRunning() || _smoothStore?.IsTransitioning == true))
-                return;
+            if (_nativeUpdate)
+            {
+                // EFT's own fade lasts hundreds of milliseconds and finding out
+                // whether it still runs walks the headset component graph. Poll it
+                // at a coarse rate and reactivate once, after it ends.
+                if (Time.unscaledTime < _nextFadePoll) return;
+                _nextFadePoll = Time.unscaledTime + 0.05f;
+                if (NativeFadeIsRunning() || _smoothStore?.IsTransitioning == true) return;
+            }
             if (!_dirty && Time.unscaledTime < _nextPoll) return;
             _nextPoll = Time.unscaledTime + 0.2f;
             Refresh(_nativeUpdate);
@@ -95,11 +150,14 @@ namespace GunsAreLoud.Client.Runtime
 
             Headphones item = FindLocalHeadphones();
             string templateId = item?.StringTemplateId ?? "";
+            // From the worn item itself, not BetterAudio.CurrentHeadphonesTemplate:
+            // EFT can keep its no-headset Default applied long after an equip.
+            HeadsetSendLevels sends = HeadsetSendLevels.From(item?.Template);
             HeadphoneMode requested = _config.Enabled.Value
                 ? _config.HeadphoneMode.Value
                 : HeadphoneMode.Vanilla;
-            _controller.Apply(requested, templateId, force);
-            LogStatus(_controller.Status);
+            _controller.Apply(requested, templateId, force, sends);
+            LogStatus(_controller.Status, sends);
         }
 
         private static Headphones FindLocalHeadphones()
@@ -109,14 +167,31 @@ namespace GunsAreLoud.Client.Runtime
             return HeadphonesResolver.FindEquippedItem(player?.Equipment);
         }
 
-        private void LogStatus(HeadphoneRouteStatus status)
+        // Called five times a second. Compare the values, not a formatted line:
+        // the status is unchanged almost every time, and building the string only
+        // to throw it away was the whole cost of this path.
+        private void LogStatus(HeadphoneRouteStatus status, HeadsetSendLevels sends)
         {
-            string value = $"requested={status.Requested} effective={status.Effective} " +
+            bool transition = _smoothStore?.IsTransitioning == true;
+            if (_hasStatus &&
+                _lastStatusValue.Requested == status.Requested &&
+                _lastStatusValue.Effective == status.Effective &&
+                _lastStatusValue.TemplateId == status.TemplateId &&
+                _lastStatusValue.ProfileId == status.ProfileId &&
+                _lastStatusValue.Fallback == status.Fallback &&
+                _lastStatusValue.Detail == status.Detail &&
+                _lastTransition == transition &&
+                _lastSends.Equals(sends))
+                return;
+            _hasStatus = true;
+            _lastStatusValue = status;
+            _lastTransition = transition;
+            _lastSends = sends;
+            Plugin.Log?.LogInfo("Headphone route: " +
+                $"requested={status.Requested} effective={status.Effective} " +
                 $"template={status.TemplateId} profile={status.ProfileId} fallback={status.Fallback} " +
-                $"transition={(_smoothStore?.IsTransitioning == true)} detail={status.Detail}";
-            if (value == _lastStatus) return;
-            _lastStatus = value;
-            Plugin.Log?.LogInfo("Headphone route: " + value);
+                $"transition={transition} detail={status.Detail}" +
+                (status.Effective == HeadphoneMode.Realistic ? " sends: " + sends : ""));
         }
 
         internal void BeforeNativeTemplateUpdate()
@@ -133,6 +208,8 @@ namespace GunsAreLoud.Client.Runtime
             _nativeController = controller;
             _nativeUpdate = true;
             _dirty = true;
+            // EFT applies a template exactly when the worn headset changes.
+            HeadphonesResolver.Invalidate();
         }
 
         internal void AfterTinnitusStarted(float durationSeconds)
@@ -159,21 +236,44 @@ namespace GunsAreLoud.Client.Runtime
                 Plugin.Log?.LogWarning("Headphone route could not restore GunsVolume after tinnitus");
         }
 
+        // Resolved once per type instead of on every poll: AccessTools.Field is a
+        // name lookup, and this used to run for every component, every frame that
+        // EFT was fading a headset template.
+        private static Type _headphonesOwner, _componentsOwner, _faderOwner, _fadingOwner;
+        private static FieldInfo _headphonesField, _componentsField, _faderField;
+        private static PropertyInfo _isFadingProperty;
+
+        private static FieldInfo Field(object owner, ref Type cachedType, ref FieldInfo cached, string name)
+        {
+            Type type = owner.GetType();
+            if (!ReferenceEquals(type, cachedType))
+            {
+                cachedType = type;
+                cached = AccessTools.Field(type, name);
+            }
+            return cached;
+        }
+
         private bool NativeFadeIsRunning()
         {
             if (_nativeController == null) return false;
-            object headphones = AccessTools.Field(_nativeController.GetType(), "_headphones")
+            object headphones = Field(_nativeController, ref _headphonesOwner, ref _headphonesField, "_headphones")
                 ?.GetValue(_nativeController);
             object components = headphones == null ? null
-                : AccessTools.Field(headphones.GetType(), "_components")?.GetValue(headphones);
+                : Field(headphones, ref _componentsOwner, ref _componentsField, "_components")?.GetValue(headphones);
             if (!(components is IEnumerable sequence)) return false;
             foreach (object component in sequence)
             {
                 object fader = component == null ? null
-                    : AccessTools.Field(component.GetType(), "_fader")?.GetValue(component);
-                PropertyInfo property = fader == null ? null
-                    : AccessTools.Property(fader.GetType(), "IsFading");
-                if (property != null && property.GetValue(fader) is bool fading && fading)
+                    : Field(component, ref _faderOwner, ref _faderField, "_fader")?.GetValue(component);
+                if (fader == null) continue;
+                Type faderType = fader.GetType();
+                if (!ReferenceEquals(faderType, _fadingOwner))
+                {
+                    _fadingOwner = faderType;
+                    _isFadingProperty = AccessTools.Property(faderType, "IsFading");
+                }
+                if (_isFadingProperty != null && _isFadingProperty.GetValue(fader) is bool fading && fading)
                     return true;
             }
             _nativeController = null;
@@ -186,6 +286,7 @@ namespace GunsAreLoud.Client.Runtime
             {
                 _config.HeadphoneMode.SettingChanged -= OnModeChanged;
                 _config.Enabled.SettingChanged -= OnModeChanged;
+                _config.Source.SettingChanged -= OnAnySettingChanged;
             }
             _controller?.RestoreForShutdown();
             _smoothStore?.Flush();

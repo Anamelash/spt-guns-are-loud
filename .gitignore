@@ -22,3 +22,6 @@ tmp/
 
 # Local registration experiments and machine-specific test scripts
 experiments/
+
+# Test run reports
+TestResults/

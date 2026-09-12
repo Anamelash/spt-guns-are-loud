@@ -5,7 +5,9 @@
 Use Unity 2022.3.43f1. Create a minimal project at
 `docs/internal/headphone-model-2026-09-07/mixer-project`, copy the verified
 original mixer to `Assets/Validation/VanillaMasterMixer.mixer`, and copy
-`MixerRouteGenerator.cs` and `MixerOfflineValidation.cs` to `Assets/Editor`.
+`MixerRouteGenerator.cs`, `GunshotContrastMixerRouteTable.cs`,
+`GunshotContrastMixerRouter.cs`, `MixerContrastRuntimeValidation.cs` and
+`MixerOfflineValidation.cs` to `Assets/Editor`.
 The generator makes fresh baseline/candidate copies from that immutable input.
 Both the game's Meta XR reflection plugin and the reviewed GAL audio plugin
 must be preloaded in the Editor before opening this project.
@@ -25,9 +27,17 @@ The generator wraps every dry child of `World` except `Headphones` in a
 snapshot. The stock headphone subtree remains intact. Twelve new parallel sends
 feed one `GAL Electronics` receive and one persistent native processor. Nine
 routes follow the existing Guns, player, NPC, environment, ambient and
-effects-return category sends; three direct routes cover NonspatialBypass, Voip
-and Occlusion. In Vanilla, the new sends and electronic bus are silent, and the
-passive bus is neutral.
+effects-return category sends. At runtime those nine GAL sends inherit the
+active EFT headset's matching send levels; this preserves category balance and
+hard mutes while replacing only the processor. Three direct routes cover
+NonspatialBypass, Voip and Occlusion. In Vanilla, the new sends and electronic
+bus are silent, and the passive bus is neutral.
+
+The generator also adds one neutral `GAL Contrast Input` child to each of the
+52 explicitly mapped direct-source groups. Moving a source to that child applies
+one shared contrast level before the original parent effects and sends. Guns,
+grenades, VOIP, UI, music, shared returns and unknown routes are not inferred
+from the hierarchy and remain on their original groups.
 
 The generated bundle is a prototype until the offline renderer confirms that
 Vanilla is identical and the fitted passive curve meets its error bound.
@@ -38,6 +48,8 @@ whose exposed-name lookup differs from the game's hash lookup.
 parameters and all snapshot values to the current game's compiled constants
 by GUID. It permits the documented passive reparenting and inserted nodes in
 the serialized effect list; it does not excuse changes to stock send targets.
+Pass the generated `gunshot-contrast-routes.txt` as the third argument so it can
+also verify every compiled input parent, neutral fader and route count.
 
 Native Unity 2022.3 calibration is essential. ParamEQ `Frequency gain` is the
 biquad amplitude coefficient `A = 10^(gainDb / 40)`, so a control value of 2

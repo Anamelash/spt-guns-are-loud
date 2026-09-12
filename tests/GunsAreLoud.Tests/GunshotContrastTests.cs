@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
 using BepInEx.Configuration;
@@ -86,6 +87,23 @@ namespace GunsAreLoud.Tests
         }
 
         [Test]
+        public void MixerInputTableCoversOnlyExplicitEligibleSourceGroups()
+        {
+            ContrastRouteSpec[] routes = GunshotContrastMixerRouteTable.Routes;
+            Assert.That(routes, Has.Length.EqualTo(52));
+            Assert.That(routes.Select(route => route.ParentPath).Distinct().Count(), Is.EqualTo(routes.Length));
+            Assert.That(routes.Select(route => route.InputPath).Distinct().Count(), Is.EqualTo(routes.Length));
+            Assert.That(routes.Select(route => route.Parameter).Distinct().Count(), Is.EqualTo(routes.Length));
+            Assert.That(routes.All(route => GunshotContrastModel.ShouldAttenuate(route.ParentName)), Is.True);
+            Assert.That(routes.Count(route => route.ParentName == "Occlusion"), Is.EqualTo(2));
+            Assert.That(routes.Any(route => route.ParentName == "Inventory"), Is.True);
+            Assert.That(routes.Any(route => route.ParentName == "Instrumental"), Is.True);
+            Assert.That(routes.Any(route => route.ParentName == "Voip"), Is.False);
+            Assert.That(routes.Any(route => route.ParentName == "Returns"), Is.False);
+            Assert.That(routes.Any(route => route.ParentName == "Gunshots"), Is.False);
+        }
+
+        [Test]
         public void StereoRatioPolarityAndTimingArePreservedWithoutClipping()
         {
             float[] data = { 0f, 0f, 2f, -1f, 0.5f, -0.25f, 0f, 0f };
@@ -137,8 +155,34 @@ namespace GunsAreLoud.Tests
             Assert.That(GunshotContrastModel.RouteGain("Environment", true, true, config.GunshotContrastDb.Value), Is.EqualTo(1));
             Assert.That(config.GetTuning().PitchedLayerGainDb, Is.EqualTo(before.PitchedLayerGainDb));
             Assert.That(config.GetTuning().LowEndNormalizationPercent, Is.EqualTo(before.LowEndNormalizationPercent));
-            Assert.That(config.GetTuning().IndoorHeadphonesDampingPercent, Is.EqualTo(before.IndoorHeadphonesDampingPercent));
             Assert.That(config.GetTuning().MasterSeverityScale, Is.EqualTo(before.MasterSeverityScale));
+        }
+
+        /// <summary>
+        /// Teardown at the end of a raid undoes two things that outlive it: the
+        /// attenuation written into the mixer, and the group every tracked source
+        /// was routed away from. Unity may already have taken the mixer or a
+        /// source apart by then, so each step has to be able to fail on its own
+        /// without skipping the others. It did not: one exception in the
+        /// neutralize left the whole game attenuated and every source still
+        /// routed through the contrast input for the rest of the session.
+        /// </summary>
+        [Test]
+        public void TeardownGuardsEachStepSoOneFailureCannotSkipTheRest()
+        {
+            MethodInfo shutdown = typeof(GunshotContrastController).GetMethod(
+                "Shutdown", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            Assert.That(shutdown, Is.Not.Null);
+            Assert.That(shutdown.GetMethodBody().ExceptionHandlingClauses.Count,
+                Is.GreaterThanOrEqualTo(2),
+                "The mixer neutralize and the per-source detach are each guarded.");
+
+            MethodInfo neutralize = typeof(GunshotContrastMixerRouter).GetMethod(
+                "Neutralize", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            Assert.That(neutralize, Is.Not.Null);
+            Assert.That(neutralize.GetMethodBody().ExceptionHandlingClauses.Count,
+                Is.GreaterThanOrEqualTo(1),
+                "A route that cannot be written must not stop the rest from being reset.");
         }
     }
 }

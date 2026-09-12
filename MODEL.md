@@ -17,17 +17,18 @@ The following constraints apply:
 - EFT's original gunshot clips are never rewritten;
 - a missed or cold derived layer is never replayed late;
 - unknown audio routes and unsupported headsets fail open to stock behavior;
-- disabling the mod clears its hearing state and bypasses its processing.
+- disabling the mod clears its hearing state and bypasses its processing; only the output safety limiter described below remains on the listener.
 
 ## Signal flow
 
 ```text
 EFT weapon event
   -> original EFT dry and room paths
-  -> optional mod-derived low-end layer
+  -> mod-derived low-end layer (pitched copy of the same recording)
   -> EFT gun mixer and room returns
   -> Vanilla or Realistic active-headset route
   -> temporary hearing response
+  -> output safety limiter
   -> player output
 ```
 
@@ -35,31 +36,65 @@ The low-end layer is derived from the same first-person recording and retains it
 
 ## Gunshot character
 
-### Original-band method
+### Pitched copy
 
-`OriginalBand` derives a short parallel band from the live EFT report. A 38 Hz high-pass is subtracted from a caliber-dependent low-pass between 170 and 310 Hz, producing a bounded low-frequency body without an oscillator or noise generator. Each real automatic shot gets its own 120 ms envelope, so a burst accumulates overlapping transients without restarting one shared envelope.
-
-This method keeps the exact source timing and is also the timely fallback while a pitch-copy cache is cold.
-
-### Pitched-copy method
-
-`PitchedCopy` plays a synchronized copy of EFT's selected report through the same gun mixer group. The playback ratio is
+The added low end is a copy of EFT's selected report played through the same gun mixer group. The playback ratio is
 
 ```text
 r = 2^(-s / 12)
 ```
 
-where `s` is the pitch reduction in semitones. The copy then passes through matching second-order high-pass and low-pass filters with Q = 1, a user gain stage, an equal-power fade, cartridge weighting, normalization, and optional inherited occlusion.
+where `s` is the pitch reduction in semitones. Slowing a recording by `r` lowers every frequency by the same ratio and stretches its time structure by `1 / r`: at the default 12 semitones, a 1.2 s report becomes a 2.4 s copy one octave lower. The copy then passes through matching second-order high-pass and low-pass filters with Q = 1, a user gain stage, an equal-power fade, cartridge weighting, normalization, and optional inherited occlusion.
 
-The copy is additive: the original EFT report is still present. It does not create a new weapon event or re-enter gameplay code.
+The copy is additive: the original EFT report is still present. It does not create a new weapon event or re-enter gameplay code. It is never longer than its source recording stretched by `1 / r`, even where EFT reserves a longer playback window for a tail.
+
+Copies play from one shared pool of voices owned by the mod. EFT reissues its pooled sources to unrelated sounds within a fraction of a second, so a copy that must outlive its round, such as a recorded tail, is not tied to the source that triggered it. This is the only low-end method; there is no live band-split approximation.
 
 ### Automatic fire
 
-EFT automatic bodies are authored as looping banks rather than one newly queued clip per bullet. The mod therefore treats gameplay shot calls as the authoritative sequence and uses the bank's `BeatLn` only as its audio boundary.
+EFT automatic bodies are authored as looping banks rather than one newly queued clip per bullet. The mod therefore treats gameplay shot calls as the authoritative sequence and schedules one copy per real round.
 
-During weapon warmup, the production `CachedReport` route silently decodes one authored body interval and the corresponding recorded tail. `FullReportPerShot` schedules that composite report once for each real bullet. A 2 ms seam prevents a discontinuity while preserving the body/tail boundary and authored relative volume. When a complete report was scheduled, the later EFT trigger-release tail is not copied a second time.
+During weapon warmup, the `CachedReport` route silently decodes one authored body interval and the corresponding recorded tail. `FullReportPerShot` schedules that composite report once for each real bullet. A 2 ms seam prevents a discontinuity while preserving the body/tail boundary and authored relative volume. When a complete report was scheduled, the later EFT trigger-release tail is not copied a second time. `TailAfterBurst` uses the short body, an optional bounded synthetic decay, and one processed recorded tail after trigger release. `BuiltInDSP` is a legacy comparison route and is not the production normalized path.
 
-If the cache is not ready, the shot remains timely and uses `OriginalBand`; missed copies are never replayed. `TailAfterBurst` is an advanced alternative that uses the short body, optional bounded synthetic decay, and one processed recorded tail after trigger release. `BuiltInDSP` is a diagnostic comparison route and is not the production normalized path.
+Until warmup has cached a weapon's report, its rounds play without the added layer. A missed or cold round is never replayed later.
+
+#### Round clock
+
+Copies are placed on a rolling clock rather than at the moment the main thread learns of a round, because that moment is quantized by frame time and by the audio buffer. The clock starts on the round's interval `T_beat = BeatLn / pitch`, the beat of the looping recording, with the pitch factor bounded to 0.965-1.045. Rounds arrive at the weapon's own fire rate, and the two can differ by a fifth or more: one rifle in testing reported a 97.2 ms beat and fired every 77.2 ms.
+
+The clock therefore observes the burst. After `n` rounds observed at audio times `t_0 ... t_n`, the measured interval is
+
+```text
+T_obs = (t_n - t_0) / n
+```
+
+Averaging over the burst divides a single observation's timing error by `n`. With `b` the audio buffer duration, the clock switches to `T_obs` once `n >= 8` and
+
+```text
+|T_obs - T_beat| > max(0.01 * T_beat, 2 * b / n)
+```
+
+so a twenty-percent difference is followed within eight rounds and a one-percent difference within a few dozen. A gap of more than three beats starts a new measurement.
+
+Each copy is then checked against the present `now` with a minimum scheduling lead of 4 ms:
+
+```text
+late budget  = min(b, 0.25 * T) * lateToleranceScale
+early budget = min(b + 0.25 * T, 0.5 * T)
+```
+
+A copy later than the late budget is skipped, and the clock is moved to the present so the rounds held back by a stalled frame are not released together. A copy further ahead of its round than the early budget is brought back to the edge of that budget, and the clock with it; the round is real, so this copy still plays. Late copies that would land within half an interval of the previous start after clamping are dropped as a stack. At 1024 samples and 48 kHz, `b` is 21.3 ms.
+
+#### Overlap budget
+
+A pitched full report lasts several seconds, so at 600-900 rounds per minute every round would otherwise leave dozens of copies sounding. When a later round's copy starts, each earlier copy of the burst is asked to finish by
+
+```text
+release_time = start + overlapShots * T_beat
+fade         = overlapShots * T_beat * fadePortion
+```
+
+The default is 6 rounds. A single shot and the last round of a burst have no successor and keep their full recorded tail.
 
 ## Low-end level model
 
@@ -81,16 +116,16 @@ suppressed           = matching environment - 12 dB
 decay target         = 20% of the body target
 ```
 
-For measured RMS `m`, target `t`, and normalization control `q`, the body correction is
+For measured RMS `m`, target `t`, and the `Low-End Normalization` control `q` in dB, the body correction is
 
 ```text
 requested_dB = clamp(20 log10(t / m), -12 dB, +12 dB)
-gain         = 10^(requested_dB * clamp(q, 0, 150) / 100 / 20)
+gain         = 10^(requested_dB * clamp(q, 0, 18) / 12 / 20)
 ```
 
 For nonautomatic pistol copies, normalization measures the band below 180 Hz and applies a scalar gain to the existing copy, without adding a playback crossover. The lower correction bound is -24 dB for this route; the upper bound is +12 dB. Other routes use the ±12 dB bounds above.
 
-At 100%, the ordinary correction is limited to ±12 dB. Values above 100% scale that bounded request, reaching at most ±18 dB at 150%. Signals below the minimum measurable RMS are never boosted.
+At the calibrated 12 dB, the ordinary correction is limited to ±12 dB. Larger values scale that bounded request, reaching at most ±18 dB at 18 dB; 0 dB preserves the recorded differences. Signals below the minimum measurable RMS are never boosted.
 
 The decay is conservative. A quiet decay may recover by at most 6 dB relative to an attenuated body and never above its native level. A strong decay keeps the body correction. If the body already requires gain above unity, the decay receives no additional recovery. Playback holds the body coefficient through the first 180 ms or the actual automatic body boundary, whichever is later, then moves to the decay coefficient over 30 ms.
 
@@ -110,7 +145,7 @@ The exposure model assigns baseline severity by cartridge family:
 | Heavy and exceptional | 1.55 |
 | Unknown fallback | 0.75 |
 
-The pitched layer applies a separate cartridge-family contrast after normalization. At 100%, an intermediate rifle cartridge is about 3 dB above 9×19 in the added layer; 200% gives about 6 dB; 300% gives about 9 dB. This weighting does not turn the entire EFT gunshot up by those amounts.
+The pitched layer applies a separate cartridge-family contrast after normalization. `Cartridge Contrast` is the level of an intermediate rifle cartridge above 9×19 in the added layer: 6 dB by default, 0 dB to remove the weighting, 9 dB at most. This weighting does not turn the entire EFT gunshot up by those amounts.
 
 `Gunshot Impact` scales the profile's direct lift and low-end contribution. Direct lift is bounded at 6.5 dB before conversion to linear gain. Suppressors retain only 38% of that lift. The low-end addition uses bounded mixing at its own insert, but this is not a guarantee that the complete EFT output chain cannot overload.
 
@@ -166,7 +201,7 @@ This makes isolated shots recover quickly while sustained fire lingers. The dura
 
 Temporary hearing loss maps normalized dose through a response curve, then applies independent left/right attenuation and low-pass cutoff. Tinnitus uses a separate threshold, strength, and duration mapping. F12 provides independent intensity and duration controls for hearing loss and ringing. Both begin from shot-derived exposure, but changing one effect does not change the other effect's intensity or recovery scale.
 
-At 0%, either effect is fully bypassed. Disabling both effects or disabling the mod clears accumulated state rather than preserving a hidden dose for later.
+At 0%, either effect is fully bypassed. The General `Hearing Loss` and `Ringing` switches turn one effect off for both gunfire and explosions without changing the other effect, the gunshots, or headset protection. Turning both effects off, or disabling the mod, clears the accumulated state rather than preserving a hidden dose for later.
 
 ## Indoor response
 
@@ -183,6 +218,21 @@ gain = 10^(-contrast_dB / 20)
 ```
 
 Gun dry and wet routes, the mod's low-end layer, UI, music, and voice chat are excluded. Unknown or shared routes are left unchanged. This preserves the gunshot level and creates contrast by lowering competing world sound, which also means useful cues such as footsteps and character speech become quieter.
+
+The attenuation is written to dedicated routes in the mod's mixer, 52 in the current asset, so it costs nothing per sound. Groups without a route receive a per-source fallback filter. Leaving a raid undoes each route and each tracked source independently, so one failed step cannot leave the attenuation in the mixer.
+
+## Output safety limiter
+
+The listener's final buffer passes through a stereo-linked peak limiter:
+
+```text
+knee    = 0.95  (-0.45 dBFS)
+ceiling = 0.999 (-0.009 dBFS)
+attack  = instantaneous
+release = 200 ms
+```
+
+Below the knee the buffer is untouched. Between the knee and the ceiling the gain follows a smooth curve instead of a hard clip, which removes the crackle of a close unprotected indoor shot summed with its added layer. Because it acts only in the last half decibel below full scale, it does not change loudness balance, and signals heard through an active headset normally never reach it. It is a safety stage, not a loudness model.
 
 ## Active-headset model
 
@@ -242,9 +292,9 @@ Explosion hearing loss and ringing each have independent strength and duration s
 
 ## F12 organization and defaults
 
-Sections are ordered `General`, `Gunshots`, `Explosions`, then `Low-level & debug`. Low-level controls are advanced entries, hidden until the Configuration Manager's Advanced toggle is enabled. General contains the master switch, preset, headset mode, and fit. Shot and explosion effects have their own sections.
+Sections are ordered `General`, `Gunshots`, `Explosions`, then `Low-level & debug`. Low-level controls are advanced entries, hidden until the Configuration Manager's Advanced toggle is enabled. General contains the master switch, preset, the Hearing Loss and Ringing switches, headset mode, and fit. Shot and explosion effects have their own sections.
 
-Default settings are Balanced, Realistic, Tight fit; shot impact 160%, contrast 8 dB, indoor emphasis 100%, hearing-loss/ringing intensity and duration 100%, and ear difference 140%. The added layer defaults to PitchedCopy / CachedReport / FullReportPerShot, 12 semitones down, normalization 100%, cartridge contrast 200%, 10.00001–2000 Hz filtering, 50% fade, 30 ms fallback decay, +20 dB copy gain, inherited occlusion, and a 500.4695 Hz fully occluded cutoff. Per-shot logging is enabled by default. Existing saved configuration values take precedence over these defaults.
+Default settings are Balanced, Realistic, Tight fit, Hearing Loss and Ringing on; shot impact 160%, contrast 8 dB, indoor emphasis 100%, hearing-loss/ringing intensity and duration 100%, and ear difference 140%. The added layer defaults to CachedReport / FullReportPerShot, 6-round report overlap, 100% late tolerance, 12 semitones down, 12 dB normalization, 6 dB cartridge contrast, 10–2000 Hz filtering, 50% fade, 30 ms fallback decay, +20 dB copy gain, inherited occlusion, and a 500 Hz fully occluded cutoff. Both diagnostic logs are off; per-shot logging resets to off at every start. Existing saved configuration values take precedence over these defaults, and settings stored in percent by earlier versions are converted to decibels on first load without changing the sound.
 
 ## Limitations and interpretation
 

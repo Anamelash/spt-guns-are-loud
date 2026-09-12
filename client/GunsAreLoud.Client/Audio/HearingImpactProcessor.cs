@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using GunsAreLoud.Client.Configuration;
+using GunsAreLoud.Client.Runtime;
 using UnityEngine;
 
 namespace GunsAreLoud.Client.Audio
@@ -31,6 +32,7 @@ namespace GunsAreLoud.Client.Audio
         internal readonly int PreClampOverCount;
         internal readonly int PostClampOverCount;
         internal readonly int NonFiniteCount;
+        internal readonly DiagnosticShotToken DiagnosticShot;
         internal readonly ListenerProbeWindowAnchor WindowAnchor;
         internal readonly bool IncludesConcurrentAudio;
         internal readonly int ChannelsMeasured;
@@ -53,7 +55,8 @@ namespace GunsAreLoud.Client.Audio
             int preClampOverCount,
             int postClampOverCount,
             int nonFiniteCount,
-            int channelsMeasured)
+            int channelsMeasured,
+            DiagnosticShotToken diagnosticShot)
         {
             ProbeId = probeId;
             Route = route;
@@ -75,6 +78,7 @@ namespace GunsAreLoud.Client.Audio
             ChannelScope = ListenerProbeChannelScope.FrontPair;
             FilterStateResetAtWindowBout = true;
             IncludesInitialFilterTransient = true;
+            DiagnosticShot = diagnosticShot;
         }
     }
 
@@ -87,7 +91,7 @@ namespace GunsAreLoud.Client.Audio
         private const int MaximumDiagnosticProbes = 8;
         private const float DiagnosticWindowSeconds = 0.24f;
 
-        private MasterProbe[] _masterProbes = CreateMasterProbes();
+        private ProbeSet _probeSet = new ProbeSet();
         private volatile bool _hearingEnabled;
         private volatile float _targetWetLeft;
         private volatile float _targetWetRight;
@@ -103,13 +107,14 @@ namespace GunsAreLoud.Client.Audio
 
         private HearingDspChannelState _leftState;
         private HearingDspChannelState _rightState;
+        private MasterLimiterState _limiter;
         private double _phaseLeft;
         private double _phaseRight;
         private int _nextProbeId;
-        private int _activeProbeCount;
         private int _probeResetGeneration;
         private int _audioProbeResetGeneration;
         private int _lastChannelLayout;
+        private int _limiterChannelLayout;
         private int _bypassGeneration;
         private int _audioBypassGeneration;
         private float _probeLp20Left;
@@ -168,23 +173,25 @@ namespace GunsAreLoud.Client.Audio
         internal int ArmMasterProbe(
             AutomaticPitchedRoute route,
             bool automaticBank,
-            int outputSampleRate)
+            int outputSampleRate,
+            DiagnosticShotToken diagnosticShot = default)
         {
             EnsureMasterProbes();
+            ProbeSet probeSet = Volatile.Read(ref _probeSet);
             int probeId = Interlocked.Increment(ref _nextProbeId);
             int targetFrames = Mathf.Max(
                 1,
                 Mathf.RoundToInt(Mathf.Max(8000, outputSampleRate) * DiagnosticWindowSeconds));
-            for (int index = 0; index < _masterProbes.Length; index++)
+            for (int index = 0; index < probeSet.Probes.Length; index++)
             {
-                MasterProbe probe = _masterProbes[index];
+                MasterProbe probe = probeSet.Probes[index];
                 if (Interlocked.CompareExchange(ref probe.State, -1, 0) != 0)
                 {
                     continue;
                 }
 
-                probe.Reset(probeId, route, automaticBank, targetFrames);
-                if (Interlocked.Increment(ref _activeProbeCount) == 1)
+                probe.Reset(probeId, route, automaticBank, targetFrames, diagnosticShot);
+                if (Interlocked.Increment(ref probeSet.ActiveCount) == 1)
                 {
                     Interlocked.Increment(ref _probeResetGeneration);
                 }
@@ -197,9 +204,10 @@ namespace GunsAreLoud.Client.Audio
         internal bool TryTakeMasterProbe(out ListenerBandTelemetry telemetry)
         {
             EnsureMasterProbes();
-            for (int index = 0; index < _masterProbes.Length; index++)
+            ProbeSet probeSet = Volatile.Read(ref _probeSet);
+            for (int index = 0; index < probeSet.Probes.Length; index++)
             {
-                MasterProbe probe = _masterProbes[index];
+                MasterProbe probe = probeSet.Probes[index];
                 if (Volatile.Read(ref probe.State) != 2)
                 {
                     continue;
@@ -221,7 +229,8 @@ namespace GunsAreLoud.Client.Audio
                     probe.PeakWindow.Measurement.PreClampOverCount,
                     probe.PeakWindow.Measurement.PostClampOverCount,
                     probe.PeakWindow.Measurement.NonFiniteCount,
-                    probe.ChannelsMeasured);
+                    probe.ChannelsMeasured,
+                    probe.DiagnosticShot);
                 Volatile.Write(ref probe.State, 0);
                 return true;
             }
@@ -230,25 +239,91 @@ namespace GunsAreLoud.Client.Audio
             return false;
         }
 
+        internal void CancelMasterProbes()
+        {
+            EnsureMasterProbes();
+            // Swap the whole bounded probe set. An audio callback already using
+            // the old set may finish it, but it cannot write into or decrement
+            // counters belonging to a newly armed diagnostic session.
+            Volatile.Write(ref _probeSet, new ProbeSet());
+            Interlocked.Increment(ref _probeResetGeneration);
+        }
+
+        /// <summary>
+        /// A sine advanced by the two-term recurrence. Seeded with NaN it returns
+        /// zero and does no work at all, which is the state whenever no ringing is
+        /// sounding; seeded with a phase it reproduces <c>Math.Sin(phase)</c> and
+        /// then advances by one fixed step per frame.
+        /// </summary>
+        private struct RingOscillator
+        {
+            private float _sin, _cos, _stepSin, _stepCos;
+            private bool _active;
+
+            internal void Seed(double phase, double step)
+            {
+                _active = !double.IsNaN(phase);
+                if (!_active) return;
+                _sin = (float)Math.Sin(phase);
+                _cos = (float)Math.Cos(phase);
+                _stepSin = (float)Math.Sin(step);
+                _stepCos = (float)Math.Cos(step);
+            }
+
+            internal float Next()
+            {
+                if (!_active) return 0f;
+                float value = _sin;
+                float sin = _sin * _stepCos + _cos * _stepSin;
+                float cos = _cos * _stepCos - _sin * _stepSin;
+                _sin = sin;
+                _cos = cos;
+                return value;
+            }
+        }
+
+        private RingOscillator _ringLeft, _ringRight;
+
         private void OnAudioFilterRead(float[] data, int channels)
         {
+            long trace = AudioFilterTrace.Begin();
             if (data == null || data.Length == 0 || channels <= 0)
             {
+                AudioFilterTrace.Record(AudioFilterKind.Hearing, trace, 0, channels, idle: true);
                 return;
             }
 
             int sampleRate = Math.Max(8000, _targetSampleRate);
             int bypassGeneration = Volatile.Read(ref _bypassGeneration);
+            // The limiter carries gain between buffers, so it is reset by the
+            // generation and the layout only — never on the ordinary "no hearing
+            // effect" path below, which runs on every buffer and would otherwise
+            // throw away its release every 21 ms.
             if (_audioBypassGeneration != bypassGeneration)
             {
                 _audioBypassGeneration = bypassGeneration;
                 ResetHearingAudioThreadState();
+                _limiter.Reset();
+            }
+            int layout = channels == 1 ? 1 : 2;
+            if (_limiterChannelLayout != layout)
+            {
+                if (_limiterChannelLayout != 0) _limiter.Reset();
+                _limiterChannelLayout = layout;
             }
             bool hearingEnabled = _hearingEnabled;
-            bool probesArmed = Volatile.Read(ref _activeProbeCount) > 0;
+            ProbeSet probeSet = Volatile.Read(ref _probeSet);
+            bool probesArmed = probeSet != null && Volatile.Read(ref probeSet.ActiveCount) > 0;
             if (!hearingEnabled && !probesArmed)
             {
                 ResetHearingAudioThreadState();
+                // No hearing effect and no armed probe. The limiter still owns the
+                // ceiling here — a close shot clips with hearing loss switched off
+                // just as readily — but below the knee it leaves the buffer alone,
+                // so this stays the floor cost.
+                int limited = RunMasterLimiter(data, channels, sampleRate);
+                AudioFilterTrace.Record(
+                    AudioFilterKind.Hearing, trace, data.Length, channels, idle: limited == 0);
                 return;
             }
             if (!hearingEnabled)
@@ -278,6 +353,14 @@ namespace GunsAreLoud.Client.Audio
             float probeAlpha315 = probesArmed ? HearingDspTransfer.CutoffToAlpha(315f, sampleRate) : 0f;
             float probeAlpha2000 = probesArmed ? HearingDspTransfer.CutoffToAlpha(2000f, sampleRate) : 0f;
 
+            // The ringing tone is a sine at a fixed step. Advancing it by the
+            // two-term recurrence removes two transcendentals per frame, and when
+            // no ringing is sounding it is not advanced at all. Both oscillators
+            // are re-seeded from the exact phase once per buffer.
+            bool ringing = _targetTinnitusLeft > 0f || _targetTinnitusRight > 0f ||
+                _leftState.Tinnitus > 0f || _rightState.Tinnitus > 0f;
+            _ringLeft.Seed(ringing ? _phaseLeft : double.NaN, phaseStepLeft);
+            _ringRight.Seed(ringing ? _phaseRight : double.NaN, phaseStepRight);
             for (int frame = 0; frame < data.Length; frame += channels)
             {
                 float preClampLeft = data[frame];
@@ -286,7 +369,8 @@ namespace GunsAreLoud.Client.Audio
                 {
                     if (double.IsNaN(_phaseLeft) || double.IsInfinity(_phaseLeft)) _phaseLeft = 0.0;
                     if (double.IsNaN(_phaseRight) || double.IsInfinity(_phaseRight)) _phaseRight = 0.0;
-                    ApplyHearingEffects(data, frame, channels, smoothing, out preClampLeft, out preClampRight);
+                    ApplyHearingEffects(data, frame, channels, smoothing,
+                        out preClampLeft, out preClampRight);
 
                     _phaseLeft += phaseStepLeft;
                     _phaseRight += phaseStepRight;
@@ -301,6 +385,7 @@ namespace GunsAreLoud.Client.Audio
                 }
 
                 if (probesArmed) AccumulateMasterProbe(
+                    probeSet,
                     data,
                     frame,
                     channels,
@@ -312,9 +397,23 @@ namespace GunsAreLoud.Client.Audio
                     probeAlpha315,
                     probeAlpha2000);
             }
+            // Last stage, after the probes have read the true pre-ceiling level:
+            // the diagnostics keep reporting what actually arrived, and only the
+            // buffer that leaves for the output is bounded.
+            RunMasterLimiter(data, channels, sampleRate);
+            AudioFilterTrace.Record(AudioFilterKind.Hearing, trace, data.Length, channels);
+        }
+
+        private int RunMasterLimiter(float[] data, int channels, int sampleRate)
+        {
+            int engaged = _limiter.Process(
+                data, channels, sampleRate, out float inputPeak, out float deepestGain);
+            MasterLimiterTrace.Record(engaged, deepestGain, inputPeak);
+            return engaged;
         }
 
         private void AccumulateMasterProbe(
+            ProbeSet probeSet,
             float[] data,
             int frame,
             int channels,
@@ -359,9 +458,9 @@ namespace GunsAreLoud.Client.Audio
             double energy160To315 = StereoEnergy(band160To315Left, band160To315Right);
             double energy315To2000 = StereoEnergy(band315To2000Left, band315To2000Right);
             double totalEnergy = StereoEnergy(diagnosticLeft, diagnosticRight);
-            for (int index = 0; index < _masterProbes.Length; index++)
+            for (int index = 0; index < probeSet.Probes.Length; index++)
             {
-                MasterProbe probe = _masterProbes[index];
+                MasterProbe probe = probeSet.Probes[index];
                 if (Volatile.Read(ref probe.State) != 1)
                 {
                     continue;
@@ -382,8 +481,8 @@ namespace GunsAreLoud.Client.Audio
                     channelsMeasured);
                 if (probe.PeakWindow.Complete)
                 {
-                    Volatile.Write(ref probe.State, 2);
-                    Interlocked.Decrement(ref _activeProbeCount);
+                    if (Interlocked.CompareExchange(ref probe.State, 2, 1) == 1)
+                        Interlocked.Decrement(ref probeSet.ActiveCount);
                 }
             }
         }
@@ -410,7 +509,7 @@ namespace GunsAreLoud.Client.Audio
             if (channels == 1)
             {
                 float dry = data[frame];
-                float ring = (float)Math.Sin(_phaseLeft);
+                float ring = _ringLeft.Next();
                 data[frame] = _leftState.Process(
                     dry,
                     (_targetWetLeft + _targetWetRight) * 0.5f,
@@ -419,6 +518,7 @@ namespace GunsAreLoud.Client.Audio
                     (_targetTinnitusLeft + _targetTinnitusRight) * 0.5f,
                     ring,
                     smoothing,
+                    limited: true,
                     out preClampLeft);
                 preClampRight = preClampLeft;
                 return;
@@ -427,11 +527,11 @@ namespace GunsAreLoud.Client.Audio
             float dryLeft = data[frame];
             float dryRight = data[frame + 1];
             data[frame] = _leftState.Process(dryLeft, _targetWetLeft, _targetGainLeft,
-                _targetAlphaLeft, _targetTinnitusLeft, (float)Math.Sin(_phaseLeft), smoothing,
-                out preClampLeft);
+                _targetAlphaLeft, _targetTinnitusLeft, _ringLeft.Next(), smoothing,
+                limited: true, out preClampLeft);
             data[frame + 1] = _rightState.Process(dryRight, _targetWetRight, _targetGainRight,
-                _targetAlphaRight, _targetTinnitusRight, (float)Math.Sin(_phaseRight), smoothing,
-                out preClampRight);
+                _targetAlphaRight, _targetTinnitusRight, _ringRight.Next(), smoothing,
+                limited: true, out preClampRight);
 
             float surroundWet = (_leftState.Wet + _rightState.Wet) * 0.5f;
             float surroundGain = (_leftState.Gain + _rightState.Gain) * 0.5f;
@@ -471,9 +571,9 @@ namespace GunsAreLoud.Client.Audio
 
         private void EnsureMasterProbes()
         {
-            if (_masterProbes == null)
+            if (Volatile.Read(ref _probeSet) == null)
             {
-                _masterProbes = CreateMasterProbes();
+                Volatile.Write(ref _probeSet, new ProbeSet());
             }
         }
 
@@ -485,6 +585,12 @@ namespace GunsAreLoud.Client.Audio
                 probes[index] = new MasterProbe();
             }
             return probes;
+        }
+
+        private sealed class ProbeSet
+        {
+            internal readonly MasterProbe[] Probes = CreateMasterProbes();
+            internal int ActiveCount;
         }
 
         private sealed class MasterProbe
@@ -501,16 +607,19 @@ namespace GunsAreLoud.Client.Audio
             internal double SumTotal;
             internal AudioPeakWindow PeakWindow;
             internal int ChannelsMeasured;
+            internal DiagnosticShotToken DiagnosticShot;
 
             internal void Reset(
                 int probeId,
                 AutomaticPitchedRoute route,
                 bool automaticBank,
-                int targetFrames)
+                int targetFrames,
+                DiagnosticShotToken diagnosticShot)
             {
                 ProbeId = probeId;
                 Route = route;
                 AutomaticBank = automaticBank;
+                DiagnosticShot = diagnosticShot;
                 PeakWindow.Reset(targetFrames);
                 ChannelsMeasured = 0;
                 Sum20To80 = 0.0;

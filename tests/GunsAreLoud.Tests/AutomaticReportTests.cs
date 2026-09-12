@@ -84,11 +84,11 @@ namespace GunsAreLoud.Tests
         [Test]
         public void ReleaseCopyIsSkippedOnlyForTheShotThatScheduledItsOwnTail()
         {
-            var first = new AutomaticShotContext { AuthoredTailScheduled = true };
+            var first = new AutomaticShotContext { FullReportScheduled = true };
             var cold = new AutomaticShotContext();
             Assert.That(first.ShouldPlayReleaseCopy, Is.False);
             Assert.That(cold.ShouldPlayReleaseCopy, Is.True);
-            cold.AuthoredTailScheduled = true;
+            cold.FullReportScheduled = true;
             Assert.That(cold.ShouldPlayReleaseCopy, Is.False);
         }
 
@@ -101,7 +101,7 @@ namespace GunsAreLoud.Tests
             LocalGunshotSampleRegistry.Register(body, default, first);
             LocalGunshotSampleRegistry.Register(tail, default, first);
             Assert.That(LocalGunshotSampleRegistry.TryTake(body, out _, out var bodyContext), Is.True);
-            bodyContext.AuthoredTailScheduled = true;
+            bodyContext.FullReportScheduled = true;
             var nextBurst = new AutomaticShotContext();
             Assert.That(LocalGunshotSampleRegistry.TryTake(tail, out _, out var tailContext), Is.True);
             Assert.That(tailContext.ShouldPlayReleaseCopy, Is.False);

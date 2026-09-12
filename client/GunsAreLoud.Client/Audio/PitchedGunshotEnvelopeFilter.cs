@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using GunsAreLoud.Client.Runtime;
 using UnityEngine;
 
 namespace GunsAreLoud.Client.Audio
@@ -34,11 +35,106 @@ namespace GunsAreLoud.Client.Audio
     }
 
     /// <summary>
+    /// A cosine sampled at a fixed angular step, advanced by the two-term
+    /// recurrence instead of a call per sample. It is re-seeded from the exact
+    /// value whenever the frame it holds is not the frame being asked for, so it
+    /// cannot drift across buffers or survive a voice being re-scheduled.
+    /// </summary>
+    internal struct CosineRamp
+    {
+        private int _nextFrame;
+        private float _cos, _sin, _stepCos, _stepSin;
+        private bool _seeded;
+
+        /// <summary>Forces the next value to come from the exact formula.</summary>
+        internal void Invalidate() => _seeded = false;
+
+        internal float Cosine(int frame, double angle, double step)
+        {
+            if (!_seeded || _nextFrame != frame)
+            {
+                _cos = (float)Math.Cos(angle);
+                _sin = (float)Math.Sin(angle);
+                _stepCos = (float)Math.Cos(step);
+                _stepSin = (float)Math.Sin(step);
+                _nextFrame = frame + 1;
+                _seeded = true;
+                return _cos;
+            }
+
+            float cos = _cos * _stepCos - _sin * _stepSin;
+            float sin = _sin * _stepCos + _cos * _stepSin;
+            _cos = cos;
+            _sin = sin;
+            _nextFrame = frame + 1;
+            return cos;
+        }
+    }
+
+    /// <summary>
+    /// The envelope's three sections expressed in frames: attack, a flat body and
+    /// the fade. Only the attack and the fade need a shape, and both are a quarter
+    /// cosine, so the body costs nothing at all.
+    /// </summary>
+    internal readonly struct EnvelopeSections
+    {
+        private readonly int _sampleRate;
+        private readonly float _attackEndFrames, _fadeStartFrames, _endFrames;
+        private readonly float _attackDuration, _fadeStart, _fadeDuration;
+
+        private EnvelopeSections(int sampleRate, float attackDuration, float fadeStart,
+            float fadeDuration, float duration)
+        {
+            _sampleRate = sampleRate;
+            _attackDuration = attackDuration;
+            _fadeStart = fadeStart;
+            _fadeDuration = fadeDuration;
+            _attackEndFrames = attackDuration * sampleRate;
+            _fadeStartFrames = fadeStart * sampleRate;
+            _endFrames = duration * sampleRate;
+        }
+
+        internal static EnvelopeSections Create(float durationSeconds, float fadePercent, int sampleRate)
+        {
+            float duration = Mathf.Clamp(durationSeconds, 0.01f, 10f);
+            float attackDuration = Mathf.Min(0.002f, duration * 0.2f);
+            float requestedFade = duration * Mathf.Clamp(fadePercent, 5f, 100f) * 0.01f;
+            float fadeDuration = Mathf.Min(requestedFade, duration - attackDuration);
+            return new EnvelopeSections(Math.Max(8000, sampleRate), attackDuration,
+                duration - fadeDuration, fadeDuration, duration);
+        }
+
+        internal float Evaluate(int frame, ref CosineRamp fade)
+        {
+            if (frame < 0 || _endFrames <= 0f || _fadeDuration < 0f) return 0f;
+            if (frame >= _endFrames) return 0f;
+            if (frame < _attackEndFrames)
+            {
+                fade.Invalidate();
+                return Mathf.Sin(frame / (float)_sampleRate / _attackDuration * Mathf.PI * 0.5f);
+            }
+            if (frame <= _fadeStartFrames)
+            {
+                fade.Invalidate();
+                return 1f;
+            }
+            // The seed repeats the original expression exactly, including its
+            // float division, so a re-seeded frame is bit-comparable.
+            float time = frame / (float)_sampleRate;
+            float progress = Mathf.Clamp01((time - _fadeStart) / _fadeDuration);
+            return fade.Cosine(frame, progress * Math.PI * 0.5,
+                Math.PI * 0.5 / (_fadeDuration * (double)_sampleRate));
+        }
+    }
+
+    /// <summary>
     /// Turns any donor clip into one short transient. This prevents an automatic
     /// weapon bank containing a recorded burst from replaying the entire burst.
     /// </summary>
     internal sealed class PitchedGunshotEnvelopeFilter : MonoBehaviour
     {
+        private CosineRamp _fadeRamp;
+
         private const float OnsetThreshold = 0.004f;
 
         private volatile float _durationSeconds = 0.1f;
@@ -68,6 +164,17 @@ namespace GunsAreLoud.Client.Audio
         private HeadphoneTailEnvelope _headphoneTail;
         private BassAttackMeter _requestedBandMeter, _bandMeter;
         private volatile float _bassAttackRms, _textureAttackRms;
+        // Early release, requested by the main thread when a later round of the
+        // same burst takes over. Tagged with the voice generation, so a request
+        // aimed at a finished copy can never shorten the voice that reuses it.
+        private int _releaseRequest;
+        private int _audioReleaseRequest;
+        private volatile int _releaseGeneration;
+        private volatile float _releaseStartSeconds;
+        private volatile float _releaseFadeSeconds;
+        private bool _releasing;
+        private int _releaseStartFrame;
+        private int _releaseFadeFrames;
 
         internal bool Completed => Volatile.Read(ref _completed) != 0;
 
@@ -125,12 +232,38 @@ namespace GunsAreLoud.Client.Audio
             Interlocked.Increment(ref _generation);
         }
 
+        /// <summary>
+        /// Fades the current copy out from <paramref name="startSeconds"/> after
+        /// its onset over <paramref name="fadeSeconds"/>, then completes it. Main
+        /// thread only; the audio thread latches the request at its next callback
+        /// and never begins the fade earlier than the frame it is rendering.
+        /// </summary>
+        internal void ScheduleRelease(float startSeconds, float fadeSeconds)
+        {
+            _releaseStartSeconds = Math.Max(0f, startSeconds);
+            _releaseFadeSeconds = Math.Max(0.001f, fadeSeconds);
+            _releaseGeneration = Volatile.Read(ref _generation);
+            Interlocked.Increment(ref _releaseRequest);
+        }
+
         internal static float ClampPostFilterGain(float gain) => Mathf.Clamp(gain, 0f, 125.89255f);
+
+        // Same equal-power shape as the envelope's own fade, so an early release
+        // sounds like a shorter copy rather than a gate.
+        internal static float CalculateReleaseGain(int elapsedFrames, int fadeFrames)
+        {
+            if (fadeFrames <= 0 || elapsedFrames >= fadeFrames) return 0f;
+            if (elapsedFrames <= 0) return 1f;
+            return Mathf.Cos(elapsedFrames / (float)fadeFrames * Mathf.PI * 0.5f);
+        }
 
         private void OnAudioFilterRead(float[] data, int channels)
         {
+            long trace = AudioFilterTrace.Begin();
             if (data == null || channels <= 0)
             {
+                AudioFilterTrace.Record(
+                    AudioFilterKind.PitchedEnvelope, trace, 0, channels, idle: true);
                 return;
             }
 
@@ -142,6 +275,7 @@ namespace GunsAreLoud.Client.Audio
                 _active = _startImmediately;
                 _frame = 0;
                 _armedFrames = 0;
+                _releasing = false;
                 _levelMeter.Reset(_sampleRate);
                 _bandMeter = Volatile.Read(ref _requestedBandMeter);
                 _headphoneTail.Reset(_sampleRate, _headphoneTailDbPerSecond);
@@ -151,9 +285,30 @@ namespace GunsAreLoud.Client.Audio
                 }
             }
 
+            int releaseRequest = Volatile.Read(ref _releaseRequest);
+            if (_audioReleaseRequest != releaseRequest)
+            {
+                _audioReleaseRequest = releaseRequest;
+                // A request tagged with an earlier generation belonged to the copy
+                // this pooled voice played before; drop it rather than apply it.
+                if (_releaseGeneration == generation)
+                {
+                    int releaseRate = Math.Max(8000, _sampleRate);
+                    _releaseStartFrame = Math.Max(_frame,
+                        (int)Math.Round(_releaseStartSeconds * releaseRate));
+                    _releaseFadeFrames = Math.Max(1,
+                        (int)Math.Round(_releaseFadeSeconds * releaseRate));
+                    _releasing = true;
+                }
+            }
+
             if (Completed)
             {
                 Array.Clear(data, 0, data.Length);
+                // A finished copy still receives every buffer until its pooled
+                // voice is stopped: that is exactly the cost to watch here.
+                AudioFilterTrace.Record(
+                    AudioFilterKind.PitchedEnvelope, trace, data.Length, channels, idle: true);
                 return;
             }
 
@@ -162,6 +317,21 @@ namespace GunsAreLoud.Client.Audio
 
             int sampleRate = _sampleRate;
             int frameCount = data.Length / channels;
+            // Read the volatile configuration once per buffer and turn the
+            // envelope's section boundaries into frame counts. Inside a section
+            // the shape is either a constant or a cosine that advances by a fixed
+            // angle, so neither needs a transcendental per sample.
+            float duration = _durationSeconds;
+            float fadePercent = _fadePercent;
+            float gainLinear = _gainLinear;
+            float decayStartSeconds = _decayStartSeconds;
+            float bodyCalibration = _bodyCalibrationGain;
+            float decayCalibration = _decayCalibrationGain;
+            bool measureLevels = _measureLevels;
+            EnvelopeSections sections = EnvelopeSections.Create(duration, fadePercent, sampleRate);
+            // One exact value per buffer bounds the recurrence to this buffer's
+            // frames, so a seconds-long fade cannot accumulate drift.
+            _fadeRamp.Invalidate();
             for (int frame = 0; frame < frameCount; frame++)
             {
                 int frameOffset = frame * channels;
@@ -181,32 +351,52 @@ namespace GunsAreLoud.Client.Audio
                         {
                             CompleteAndClear(data, frameOffset + channels);
                             RecordOutputPeak(data);
+                            AudioFilterTrace.Record(
+                                AudioFilterKind.PitchedEnvelope, trace, data.Length, channels);
                             return;
                         }
                         continue;
                     }
                 }
 
-                float envelope = CalculateEnvelope(
-                    _frame,
-                    sampleRate,
-                    _durationSeconds,
-                    _fadePercent);
+                float envelope = sections.Evaluate(_frame, ref _fadeRamp);
                 if (!_active || (envelope <= 0f && _frame > 0))
                 {
                     CompleteAndClear(data, frameOffset);
                     RecordOutputPeak(data);
+                    AudioFilterTrace.Record(
+                        AudioFilterKind.PitchedEnvelope, trace, data.Length, channels);
                     return;
                 }
 
-                float calibrationGain = CalculateCalibrationGain(_frame, sampleRate,
-                    _decayStartSeconds, _bodyCalibrationGain, _decayCalibrationGain);
-                float outputGain = envelope * _gainLinear * calibrationGain * _headphoneTail.Next();
+                float releaseGain = 1f;
+                if (_releasing && _frame >= _releaseStartFrame)
+                {
+                    int elapsed = _frame - _releaseStartFrame;
+                    if (elapsed >= _releaseFadeFrames)
+                    {
+                        CompleteAndClear(data, frameOffset);
+                        RecordOutputPeak(data);
+                        AudioFilterTrace.Record(
+                            AudioFilterKind.PitchedEnvelope, trace, data.Length, channels);
+                        return;
+                    }
+                    releaseGain = CalculateReleaseGain(elapsed, _releaseFadeFrames);
+                }
+
+                // Constant on both sides of a thirty-millisecond transition; only
+                // inside it is the raised cosine worth evaluating.
+                float calibrationGain = bodyCalibration == decayCalibration
+                    ? bodyCalibration
+                    : CalculateCalibrationGain(_frame, sampleRate,
+                        decayStartSeconds, bodyCalibration, decayCalibration);
+                float outputGain = envelope * gainLinear * calibrationGain *
+                    _headphoneTail.Next() * releaseGain;
                 for (int channel = 0; channel < channels; channel++)
                 {
                     data[frameOffset + channel] *= outputGain;
                 }
-                if (_measureLevels)
+                if (measureLevels)
                 {
                     _levelMeter.AddFrame(data, frameOffset, channels);
                     _bandMeter?.AddFrame(data, frameOffset, channels);
@@ -215,6 +405,8 @@ namespace GunsAreLoud.Client.Audio
             }
 
             RecordOutputPeak(data);
+            AudioFilterTrace.Record(
+                AudioFilterKind.PitchedEnvelope, trace, data.Length, channels);
         }
 
         internal static float CalculateEnvelope(

@@ -27,6 +27,51 @@ namespace GunsAreLoud.Tests
             Assert.That(raid.Values.ContainsKey("GunsVolume"), Is.False);
         }
 
+        [TestCase("mposwoH")]
+        [TestCase("OnQSOHH")]
+        [TestCase("OtWVUHN")]
+        [TestCase("JlWLTVH")]
+        [TestCase("spoTLkN")]
+        public void PersistentMenuControlCannotBeOverwrittenByReplacementSnapshot(string control)
+        {
+            var menu = new ControlStore(); var replacement = new ControlStore();
+            menu.Values[control] = -80f;
+            replacement.Values[control] = 0f;
+            var bridge = new HeadphoneGlobalControlBridge(menu, replacement);
+
+            Assert.That(bridge.Tick(), Is.True);
+            Assert.That(replacement.Values[control], Is.EqualTo(-80f));
+
+            replacement.Values[control] = 0f;
+            Assert.That(bridge.Tick(), Is.True);
+            Assert.That(menu.Values[control], Is.EqualTo(-80f));
+            Assert.That(replacement.Values[control], Is.EqualTo(-80f));
+
+            menu.Values[control] = -15f;
+            Assert.That(bridge.Tick(), Is.True);
+            Assert.That(replacement.Values[control], Is.EqualTo(-15f));
+        }
+
+        [Test]
+        public void MusicPreservesEftRaidFadeWithoutLosingMenuVolume()
+        {
+            var menu = new ControlStore(); var replacement = new ControlStore();
+            menu.Values["mposwoH"] = -20f;
+            replacement.Values["mposwoH"] = -20f;
+            var bridge = new HeadphoneGlobalControlBridge(menu, replacement);
+
+            Assert.That(bridge.Tick(), Is.True);
+            replacement.Values["mposwoH"] = -80f;
+            Assert.That(bridge.Tick(), Is.True);
+            Assert.That(replacement.Values["mposwoH"], Is.EqualTo(-80f));
+            Assert.That(menu.Values["mposwoH"], Is.EqualTo(-20f));
+
+            replacement.Values["mposwoH"] = -20f;
+            Assert.That(bridge.Tick(), Is.True);
+            Assert.That(replacement.Values["mposwoH"], Is.EqualTo(-20f));
+            Assert.That(menu.Values["mposwoH"], Is.EqualTo(-20f));
+        }
+
         private sealed class ControlStore : GunsAreLoud.Client.Runtime.IMixerParameterStore
         {
             internal readonly System.Collections.Generic.Dictionary<string,float> Values = new System.Collections.Generic.Dictionary<string,float>();

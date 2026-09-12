@@ -50,7 +50,15 @@ namespace GunsAreLoud.Client.Runtime
 
         public bool TrySet(string name, float value)
         {
-            if (_mixer == null || !_mixer.GetFloat(name, out float current)) return false;
+            if (_mixer == null) return false;
+            // A parameter already ramping has a known current value, and it is the
+            // more accurate start: the mixer still holds last frame's write. A name
+            // with no ramp is read once, which also proves the parameter exists.
+            float current;
+            if (_ramps.TryGetValue(name, out Ramp running))
+                current = MixerParameterRamp.Evaluate(
+                    running.Start, running.Target, running.Elapsed, _duration, out _);
+            else if (!_mixer.GetFloat(name, out current)) return false;
             // Reset is a discrete generation token. Interpolating it would
             // publish many fractional generations and repeatedly reset native
             // detector state during one transition.

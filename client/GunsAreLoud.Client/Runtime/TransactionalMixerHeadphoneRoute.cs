@@ -58,6 +58,9 @@ namespace GunsAreLoud.Client.Runtime
             "GAL_ElectronicsThreshold", "GAL_ElectronicsRatio", "GAL_ElectronicsKnee",
             "GAL_ElectronicsAttack", "GAL_ElectronicsHold", "GAL_ElectronicsRelease",
             "GAL_ElectronicsCeiling", "GAL_ElectronicsWet", "GAL_ElectronicsReset",
+            // EFT's own *CompressorSendLevel parameters are neither read nor written.
+            // The electronics sends come from the worn headset template, and a
+            // restore must never write a stale snapshot over EFT's current sends.
             "GunsVolume", "OcclusionVolume", "EnvironmentVolume", "AmbientVolume",
             "EffectsReturnsGroupVolume", "OutEnvironmentVolume",
             "HeadphonesMixerVolume"
@@ -86,7 +89,7 @@ namespace GunsAreLoud.Client.Runtime
             _fits = fits ?? HeadphoneNativeEqCacheProvider.Instance;
         }
 
-        public bool TryActivate(HeadsetProfile profile, out string reason)
+        public bool TryActivate(HeadsetProfile profile, HeadsetSendLevels sends, out string reason)
         {
             if (profile?.Passive == null || profile.Electronics == null)
             { reason = "profile lacks passive or electronics path"; return false; }
@@ -97,7 +100,7 @@ namespace GunsAreLoud.Client.Runtime
             if (!TrySnapshot(out reason)) return false;
 
             int nextReset = _resetGeneration == 16777215 ? 1 : _resetGeneration + 1;
-            var values = BuildValues(profile, fit, nextReset);
+            var values = BuildValues(profile, fit, nextReset, sends);
             foreach (KeyValuePair<string, float> item in values)
             {
                 if (!_mixer.TrySet(item.Key, item.Value))
@@ -135,6 +138,26 @@ namespace GunsAreLoud.Client.Runtime
             return true;
         }
 
+        /// <summary>
+        /// Every mixer parameter this route owns, as the mixer holds it right now.
+        /// A mixer parameter outlives a raid and is not visible anywhere else, so
+        /// this is the only way to see one that a setting change moved and did not
+        /// move back.
+        /// </summary>
+        internal string DescribeLiveParameters()
+        {
+            var text = new System.Text.StringBuilder();
+            text.Append("active=").Append(_active)
+                .Append(" restorePending=").Append(_restorePending);
+            foreach (string name in Required)
+            {
+                text.Append(' ').Append(name).Append('=');
+                if (_mixer.TryGet(name, out float value)) text.Append(value.ToString("0.###"));
+                else text.Append('?');
+            }
+            return text.ToString();
+        }
+
         private bool TrySnapshot(out string reason)
         {
             if (_active) { reason = ""; return true; }
@@ -169,7 +192,7 @@ namespace GunsAreLoud.Client.Runtime
         }
 
         private static Dictionary<string, float> BuildValues(HeadsetProfile profile,
-            HeadphoneNativeEqFit fit, int resetGeneration)
+            HeadphoneNativeEqFit fit, int resetGeneration, HeadsetSendLevels sends)
         {
             HeadsetPassiveProfile passive = profile.Passive;
             HeadsetElectronicsProfile electronics = profile.Electronics;
@@ -186,15 +209,21 @@ namespace GunsAreLoud.Client.Runtime
                 ["OutEnvironmentVolume"] = 0f,
                 ["HeadphonesMixerVolume"] = -80f,
                 ["GAL_ElectronicsVolume"] = 0f,
-                ["GAL_ElectronicsGunsSend"] = 0f,
-                ["GAL_ElectronicsClientPlayerSend"] = 0f,
-                ["GAL_ElectronicsObservedPlayerSend"] = 0f,
-                ["GAL_ElectronicsNpcSend"] = 0f,
-                ["GAL_ElectronicsEnvTechnicalSend"] = 0f,
-                ["GAL_ElectronicsEnvNatureSend"] = 0f,
-                ["GAL_ElectronicsEnvCommonSend"] = 0f,
-                ["GAL_ElectronicsAmbientSend"] = 0f,
-                ["GAL_ElectronicsEffectsReturnsSend"] = 0f,
+                // These sends are parallel replacements for EFT's headphone
+                // compressor sends and keep the worn headset's category mix;
+                // forcing every route to 0 dB revives ambience and effect returns
+                // that EFT deliberately attenuates or mutes. The levels come from
+                // the worn item's template, never from the live mixer, which may
+                // still hold EFT's no-headset Default at -80 dB on every send.
+                ["GAL_ElectronicsGunsSend"] = sends.Guns,
+                ["GAL_ElectronicsClientPlayerSend"] = sends.ClientPlayer,
+                ["GAL_ElectronicsObservedPlayerSend"] = sends.ObservedPlayer,
+                ["GAL_ElectronicsNpcSend"] = sends.Npc,
+                ["GAL_ElectronicsEnvTechnicalSend"] = sends.EnvTechnical,
+                ["GAL_ElectronicsEnvNatureSend"] = sends.EnvNature,
+                ["GAL_ElectronicsEnvCommonSend"] = sends.EnvCommon,
+                ["GAL_ElectronicsAmbientSend"] = sends.Ambient,
+                ["GAL_ElectronicsEffectsReturnsSend"] = sends.EffectsReturns,
                 ["GAL_ElectronicsNonspatialBypassSend"] = 0f,
                 ["GAL_ElectronicsVoipSend"] = 0f,
                 ["GAL_ElectronicsOcclusionSend"] = 0f,

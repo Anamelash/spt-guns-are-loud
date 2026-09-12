@@ -31,18 +31,30 @@ namespace GunsAreLoud.Client.Runtime
         {
             return ToHead(Triangle(origin, head), head, player);
         }
+        // One blast is three rays through the same geometry. The buffers below are
+        // main-thread only and are reused rather than allocated per explosion; a
+        // full hit buffer only means a very crowded ray, which still resolves to
+        // the barriers common to all three.
+        private const int MaximumHits = 256;
+        private static readonly RaycastHit[] Hits = new RaycastHit[MaximumHits];
+        private static readonly Dictionary<int, bool>[] Rays =
+        {
+            new Dictionary<int, bool>(), new Dictionary<int, bool>(), new Dictionary<int, bool>()
+        };
+
         private static float ToHead(Vector3[] vertices, Vector3 head, Transform player)
         {
-            var rays = new Dictionary<int, bool>[3];
+            Dictionary<int, bool>[] rays = Rays;
             for (int i = 0; i < 3; i++)
             {
-                rays[i] = new Dictionary<int, bool>();
+                rays[i].Clear();
                 Vector3 delta = head - vertices[i]; float distance = delta.magnitude;
                 if (distance < .01f) continue;
-                foreach (var hit in Physics.RaycastAll(vertices[i], delta / distance, distance,
-                    Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+                int count = Physics.RaycastNonAlloc(vertices[i], delta / distance, Hits, distance,
+                    Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+                for (int hitIndex = 0; hitIndex < count; hitIndex++)
                 {
-                    var collider = hit.collider;
+                    var collider = Hits[hitIndex].collider;
                     if (collider == null || (player != null && collider.transform.IsChildOf(player))) continue;
                     var material = collider.GetComponent<BallisticCollider>() ?? collider.GetComponentInParent<BallisticCollider>();
                     if (material != null && (material.TypeOfMaterial == MaterialType.Body || material.TypeOfMaterial == MaterialType.BodyArmor ||

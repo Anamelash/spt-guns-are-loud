@@ -6,20 +6,20 @@ using UnityEngine;
 
 namespace GunsAreLoud.Client.Audio
 {
-    internal readonly struct CachedAutomaticBeat
+    internal readonly struct CachedAutomaticCopy
     {
         internal readonly AudioClip Clip;
         internal readonly AudioClip OriginalClip;
         internal readonly float SourceSpanSeconds;
         internal readonly float OnsetSeconds;
-        internal readonly bool HasAuthoredTail;
+        internal readonly bool IsFullReport;
         internal readonly bool NativePitch;
 
-        internal CachedAutomaticBeat(
+        internal CachedAutomaticCopy(
             AudioClip clip,
             float sourceSpanSeconds,
             float onsetSeconds,
-            bool hasAuthoredTail = false,
+            bool isFullReport = false,
             bool nativePitch = false,
             AudioClip originalClip = null)
         {
@@ -27,7 +27,7 @@ namespace GunsAreLoud.Client.Audio
             OriginalClip = originalClip;
             SourceSpanSeconds = sourceSpanSeconds;
             OnsetSeconds = onsetSeconds;
-            HasAuthoredTail = hasAuthoredTail;
+            IsFullReport = isFullReport;
             NativePitch = nativePitch;
         }
     }
@@ -56,63 +56,70 @@ namespace GunsAreLoud.Client.Audio
     /// Main-thread cache of short PCM clips captured from one authored beat of an
     /// automatic weapon loop. No AudioClip.GetData call is made against EFT clips.
     /// </summary>
-    internal static class AutomaticBeatClipCache
+    internal static class AutomaticCopyCache
     {
         // The raw BeatLn remains untouched. This PCM-only padding keeps the
         // AudioSource alive while the derived tail filter decays after it.
         internal const float MaximumSilencePaddingSeconds = 0.65f;
 
-        private static readonly Dictionary<CacheKey, CachedAutomaticBeat> Entries =
-            new Dictionary<CacheKey, CachedAutomaticBeat>();
-        private static readonly Dictionary<CacheKey, CachedAutomaticBeat> Reports =
-            new Dictionary<CacheKey, CachedAutomaticBeat>();
+        /// <summary>One fire interval of the weapon body: what every round of a
+        /// held burst plays.</summary>
+        private static readonly Dictionary<CacheKey, CachedAutomaticCopy> RoundBodies =
+            new Dictionary<CacheKey, CachedAutomaticCopy>();
+        /// <summary>That same body with the recorded tail glued after it: what one
+        /// round plays when it has to carry the whole report on its own.</summary>
+        private static readonly Dictionary<CacheKey, CachedAutomaticCopy> FullReports =
+            new Dictionary<CacheKey, CachedAutomaticCopy>();
 
-        internal static bool TryGetReport(AudioClip body, int rate, out CachedAutomaticBeat report)
+        internal static bool TryGetFullReport(AudioClip body, int rate, out CachedAutomaticCopy report)
         {
             report = default;
-            return body != null && Reports.TryGetValue(CacheKey.Create(body, 0f, rate), out report);
+            return body != null && FullReports.TryGetValue(CacheKey.Create(body, 0f, rate), out report);
         }
 
-        internal static void PublishReport(AudioClip body, AudioClip tail, int rate, float[] pcm)
+        internal static void PublishFullReport(AudioClip body, AudioClip tail, int rate, float[] pcm)
         {
             CacheKey key = CacheKey.Create(body, 0f, rate);
-            if (Reports.ContainsKey(key)) return;
+            if (FullReports.ContainsKey(key)) return;
             int frames = pcm.Length / 2;
-            AudioClip clip = AudioClip.Create($"GunsAreLoud.Report.{body.name}", frames, 2, rate, false);
+            AudioClip clip = AudioClip.Create($"GunsAreLoud.FullReport.{body.name}", frames, 2, rate, false);
             clip.hideFlags = HideFlags.DontSave;
             if (!clip.SetData(pcm, 0))
             {
                 UnityEngine.Object.Destroy(clip);
                 return;
             }
-            Reports.Add(key, new CachedAutomaticBeat(clip, frames / (float)rate, 0f,
-                hasAuthoredTail: true, nativePitch: true, originalClip: body));
-            if (Plugin.ModConfig?.DiagnosticShotLog.Value == true)
-                Plugin.Log.LogInfo($"automatic report ready body={body.name} tail={tail.name} " +
+            FullReports.Add(key, new CachedAutomaticCopy(clip, frames / (float)rate, 0f,
+                isFullReport: true, nativePitch: true, originalClip: body));
+            if (DetailedDiagnostics.TryBegin(
+                DiagnosticEventKind.AutomaticCache, out DiagnosticReservation reservation))
+                DetailedDiagnostics.Commit(
+                    reservation,
+                    $"automatic full report ready body={body.name} tail={tail.name} " +
                     $"span={frames * 1000f / rate:0}ms rate={rate}");
         }
 
-        internal static bool TryGet(
+        internal static bool TryGetRoundBody(
             AudioClip sourceClip,
             float sourceSpanSeconds,
             int sampleRate,
-            out CachedAutomaticBeat beat)
+            out CachedAutomaticCopy beat)
         {
             beat = default;
-            return sourceClip != null && Entries.TryGetValue(
+            return sourceClip != null && RoundBodies.TryGetValue(
                 CacheKey.Create(sourceClip, sourceSpanSeconds, sampleRate),
                 out beat);
         }
 
-        internal static bool Contains(
+        internal static bool ContainsRoundBody(
             AudioClip sourceClip,
             float sourceSpanSeconds,
             int sampleRate)
         {
-            return TryGet(sourceClip, sourceSpanSeconds, sampleRate, out _);
+            return TryGetRoundBody(sourceClip, sourceSpanSeconds, sampleRate, out _);
         }
 
-        internal static void Publish(
+        internal static void PublishRoundBody(
             AudioClip sourceClip,
             float sourceSpanSeconds,
             int sampleRate,
@@ -127,7 +134,7 @@ namespace GunsAreLoud.Client.Audio
             }
 
             CacheKey key = CacheKey.Create(sourceClip, sourceSpanSeconds, sampleRate);
-            if (Entries.ContainsKey(key))
+            if (RoundBodies.ContainsKey(key))
             {
                 return;
             }
@@ -135,10 +142,12 @@ namespace GunsAreLoud.Client.Audio
             int onsetFrame = FindOnsetFrame(pcm, frames, channels, out float peak);
             if (peak < 0.0005f || onsetFrame >= frames)
             {
-                if (Plugin.ModConfig?.DiagnosticShotLog.Value == true)
+                if (DetailedDiagnostics.TryBegin(
+                    DiagnosticEventKind.AutomaticCache, out DiagnosticReservation rejectedReservation))
                 {
-                    Plugin.Log.LogWarning(
-                        $"automatic beat rejected clip={sourceClip.name} " +
+                    DetailedDiagnostics.Commit(
+                        rejectedReservation,
+                        $"automatic round body rejected clip={sourceClip.name} " +
                         $"frames={frames} peak={peak:0.000000}: captured PCM is silent");
                 }
                 return;
@@ -158,7 +167,7 @@ namespace GunsAreLoud.Client.Audio
             int silenceFrames = Mathf.CeilToInt(
                 MaximumSilencePaddingSeconds * sampleRate);
             AudioClip cached = AudioClip.Create(
-                $"GunsAreLoud.Beat.{sourceClip.name}",
+                $"GunsAreLoud.RoundBody.{sourceClip.name}",
                 contentFrames + silenceFrames,
                 channels,
                 sampleRate,
@@ -170,17 +179,19 @@ namespace GunsAreLoud.Client.Audio
                 return;
             }
 
-            Entries.Add(
+            RoundBodies.Add(
                 key,
-                new CachedAutomaticBeat(
+                new CachedAutomaticCopy(
                     cached,
                     contentFrames / (float)sampleRate,
                     trimFrames / (float)sampleRate,
                     nativePitch: nativePitch, originalClip: sourceClip));
-            if (Plugin.ModConfig?.DiagnosticShotLog.Value == true)
+            if (DetailedDiagnostics.TryBegin(
+                DiagnosticEventKind.AutomaticCache, out DiagnosticReservation cachedReservation))
             {
-                Plugin.Log.LogInfo(
-                    $"automatic beat cached clip={sourceClip.name} " +
+                DetailedDiagnostics.Commit(
+                    cachedReservation,
+                    $"automatic round body cached clip={sourceClip.name} " +
                     $"frames={contentFrames}/{frames} channels={channels} rate={sampleRate} " +
                     $"span={contentFrames * 1000f / sampleRate:0.0}ms " +
                     $"onset={trimFrames * 1000f / sampleRate:0.0}ms peak={peak:0.000} " +
@@ -224,17 +235,17 @@ namespace GunsAreLoud.Client.Audio
 
         internal static void Clear()
         {
-            foreach (CachedAutomaticBeat beat in Entries.Values)
+            foreach (CachedAutomaticCopy roundBody in RoundBodies.Values)
             {
-                if (beat.Clip != null)
+                if (roundBody.Clip != null)
                 {
-                    UnityEngine.Object.Destroy(beat.Clip);
+                    UnityEngine.Object.Destroy(roundBody.Clip);
                 }
             }
-            Entries.Clear();
-            foreach (CachedAutomaticBeat report in Reports.Values)
+            RoundBodies.Clear();
+            foreach (CachedAutomaticCopy report in FullReports.Values)
                 if (report.Clip != null) UnityEngine.Object.Destroy(report.Clip);
-            Reports.Clear();
+            FullReports.Clear();
         }
 
         private readonly struct CacheKey : IEquatable<CacheKey>
@@ -335,7 +346,7 @@ namespace GunsAreLoud.Client.Audio
             _sampleRate = rate;
             _targetFrames = Mathf.Max(1, Mathf.RoundToInt(span * rate));
             _targetChannels = Mathf.Clamp(sourceClip.channels, 1, MaximumChannels);
-            if (AutomaticBeatClipCache.Contains(
+            if (AutomaticCopyCache.ContainsRoundBody(
                 sourceClip,
                 span,
                 rate))
@@ -345,7 +356,12 @@ namespace GunsAreLoud.Client.Audio
             }
 
             _capturedFrames = 0;
-            _pcm = new float[_targetFrames * _targetChannels];
+            int samples = _targetFrames * _targetChannels;
+            // This scratch buffer belongs to this component alone, so reusing it
+            // cannot collide with another capture that is still finishing; it is
+            // released when the component is switched off on a foreign sound.
+            if (_pcm == null || _pcm.Length < samples) _pcm = new float[samples];
+            else Array.Clear(_pcm, 0, samples);
             Interlocked.Increment(ref _generation);
             Volatile.Write(ref _state, Armed);
             return true;
@@ -357,15 +373,18 @@ namespace GunsAreLoud.Client.Audio
             {
                 Interlocked.Increment(ref _generation);
                 Volatile.Write(ref _state, Idle);
-                _pcm = null;
                 _capturedFrames = 0;
             }
         }
 
+        // A completed capture is published by Update on the main thread. Switching
+        // the component off before that would silently drop a warmed cache entry.
+        internal bool AwaitingPublish => Volatile.Read(ref _state) == Complete;
+
         internal AutomaticBeatCaptureTelemetry GetTelemetry()
         {
             int state = Volatile.Read(ref _state);
-            bool cached = _sourceClip != null && AutomaticBeatClipCache.Contains(
+            bool cached = _sourceClip != null && AutomaticCopyCache.ContainsRoundBody(
                 _sourceClip,
                 _sourceSpanSeconds,
                 _sampleRate);
@@ -387,7 +406,7 @@ namespace GunsAreLoud.Client.Audio
             float[] pcm = _pcm;
             int frames = _targetFrames;
             int channels = _targetChannels;
-            AutomaticBeatClipCache.Publish(
+            AutomaticCopyCache.PublishRoundBody(
                 sourceClip,
                 _sourceSpanSeconds,
                 _sampleRate,
@@ -396,20 +415,43 @@ namespace GunsAreLoud.Client.Audio
                 pcm);
             _pcm = null;
             Volatile.Write(ref _state, Published);
+            // The cache now answers for this clip. Nothing here has work again
+            // until a cold clip arms it, and ArmCapture switches it back on.
+            enabled = false;
         }
+
+        private void Awake() => GalSourceCensus.Created(GalComponentKind.BeatCapture);
+
+        private void OnEnable() => GalSourceCensus.Enabled(GalComponentKind.BeatCapture);
 
         private void OnDisable()
         {
+            GalSourceCensus.Disabled(GalComponentKind.BeatCapture);
             Cancel();
+            // Released here rather than on every cancel: a burst re-arms this same
+            // component within milliseconds and reuses the buffer.
+            _pcm = null;
         }
+
+        private void OnDestroy() => GalSourceCensus.Destroyed(GalComponentKind.BeatCapture);
 
         private void OnAudioFilterRead(float[] data, int channels)
         {
+            long trace = AudioFilterTrace.Begin();
             if (Volatile.Read(ref _state) != Armed ||
                 data == null ||
                 channels <= 0 ||
                 _pcm == null)
             {
+                // Not armed: this pooled source is playing something else, and the
+                // capture component is pure overhead on that buffer.
+                AudioFilterTrace.Record(
+                    AudioFilterKind.AutomaticCapture,
+                    trace,
+                    data == null ? 0 : data.Length,
+                    channels,
+                    idle: true,
+                    foreign: true);
                 return;
             }
 
@@ -420,6 +462,8 @@ namespace GunsAreLoud.Client.Audio
             int targetChannels = _targetChannels;
             if (pcm == null)
             {
+                AudioFilterTrace.Record(
+                    AudioFilterKind.AutomaticCapture, trace, data.Length, channels, idle: true);
                 return;
             }
 
@@ -427,6 +471,8 @@ namespace GunsAreLoud.Client.Audio
             int startFrame = 0;
             if (startFrame >= bufferFrames)
             {
+                AudioFilterTrace.Record(
+                    AudioFilterKind.AutomaticCapture, trace, data.Length, channels, idle: true);
                 return;
             }
 
@@ -448,6 +494,8 @@ namespace GunsAreLoud.Client.Audio
             if (generation != Volatile.Read(ref _generation) ||
                 Volatile.Read(ref _state) != Armed)
             {
+                AudioFilterTrace.Record(
+                    AudioFilterKind.AutomaticCapture, trace, data.Length, channels);
                 return;
             }
 
@@ -457,6 +505,8 @@ namespace GunsAreLoud.Client.Audio
             {
                 Volatile.Write(ref _state, Complete);
             }
+            AudioFilterTrace.Record(
+                AudioFilterKind.AutomaticCapture, trace, data.Length, channels);
         }
     }
 
@@ -518,16 +568,21 @@ namespace GunsAreLoud.Client.Audio
     {
         private const double MinimumSchedulingLeadSeconds = 0.004;
 
+        private static double ClockResolutionSeconds =>
+            AudioRuntimeState.BufferFrames / (double)Math.Max(8000, AudioRuntimeState.OutputSampleRate);
+
         private SuperSource _source;
         private LocalGunshotAudioTuning _tuning;
         private AudioClip _clipA;
         private AudioClip _clipB;
         private float _beatSeconds;
+        private float _clockInterval;
         private int _nextShotIndex;
         private double _sequenceStart;
+        private double _lastScheduledStart = double.NegativeInfinity;
         private bool _active;
         private readonly AutomaticShotTiming _shotTiming = new AutomaticShotTiming();
-        internal bool LastUsesAuthoredTail { get; private set; }
+        internal bool LastUsedFullReport { get; private set; }
         internal bool Active => _active && _source != null;
 
         internal void Bind(
@@ -537,7 +592,9 @@ namespace GunsAreLoud.Client.Audio
             _source = source; _tuning = tuning; _clipA = clipA; _clipB = clipB;
             _beatSeconds = Mathf.Max(0.001f, beatSeconds); _nextShotIndex = 1;
             _sequenceStart = sequenceStart;
+            _lastScheduledStart = double.NegativeInfinity;
             _active = true; _shotTiming.Begin(sequenceStart, _beatSeconds);
+            _clockInterval = _shotTiming.ObserveRound(AudioSettings.dspTime, _beatSeconds, ClockResolutionSeconds);
         }
 
         internal bool Begin(
@@ -563,134 +620,209 @@ namespace GunsAreLoud.Client.Audio
             _tuning = tuning;
             int shotIndex = _nextShotIndex++;
             _beatSeconds = Mathf.Max(0.001f, tuning.PitchedLayerLoopBeatSeconds);
-            return Schedule(shotIndex, _shotTiming.Advance(_beatSeconds), context);
+            _clockInterval = _shotTiming.ObserveRound(AudioSettings.dspTime, _beatSeconds, ClockResolutionSeconds);
+            return Schedule(shotIndex, _shotTiming.Advance(_clockInterval), context);
         }
 
         internal void StopTimeline()
         {
             _active = false;
             _nextShotIndex = 0;
-            LastUsesAuthoredTail = false;
+            _lastScheduledStart = double.NegativeInfinity;
+            LastUsedFullReport = false;
         }
 
         internal void UpdateInterval(double changeTime, float beatSeconds)
         {
-            if (_active && Mathf.Abs(_beatSeconds - beatSeconds) > 0.000001f)
-            { _shotTiming.ChangeInterval(changeTime, beatSeconds); _beatSeconds = beatSeconds; }
+            if (!_active || Mathf.Abs(_beatSeconds - beatSeconds) <= 0.000001f) return;
+            _beatSeconds = beatSeconds;
+            // A burst already running on its own measured pace keeps it: the
+            // recording's pitch says nothing about how fast the weapon fires.
+            if (!_shotTiming.FollowsObservedPace)
+            { _shotTiming.ChangeInterval(changeTime, beatSeconds); _clockInterval = beatSeconds; }
         }
 
         private bool Schedule(int shotIndex, double boundary, AutomaticShotContext context)
         {
-            LastUsesAuthoredTail = false;
-            int sampleRate = AudioSettings.outputSampleRate;
-            bool reportAReady = AutomaticBeatClipCache.TryGetReport(_clipA, sampleRate, out CachedAutomaticBeat reportA);
-            bool reportBReady = AutomaticBeatClipCache.TryGetReport(_clipB, sampleRate, out CachedAutomaticBeat reportB);
-            bool completeReport = _tuning.AutomaticTailMode == Configuration.AutomaticTailMode.FullReportPerShot &&
-                (_clipA == null || reportAReady) && (_clipB == null || reportBReady);
-            AutomaticBeatClipCache.TryGet(
+            LastUsedFullReport = false;
+            int sampleRate = AudioRuntimeState.OutputSampleRate;
+            bool fullReportAReady = AutomaticCopyCache.TryGetFullReport(_clipA, sampleRate, out CachedAutomaticCopy fullReportA);
+            bool fullReportBReady = AutomaticCopyCache.TryGetFullReport(_clipB, sampleRate, out CachedAutomaticCopy fullReportB);
+            bool usesFullReport = _tuning.AutomaticTailMode == Configuration.AutomaticTailMode.FullReportPerShot &&
+                (_clipA == null || fullReportAReady) && (_clipB == null || fullReportBReady);
+            AutomaticCopyCache.TryGetRoundBody(
                 _clipA,
                 _beatSeconds,
                 sampleRate,
-                out CachedAutomaticBeat beatA);
-            AutomaticBeatClipCache.TryGet(
+                out CachedAutomaticCopy copyA);
+            AutomaticCopyCache.TryGetRoundBody(
                 _clipB,
                 _beatSeconds,
                 sampleRate,
-                out CachedAutomaticBeat beatB);
-            if (completeReport)
+                out CachedAutomaticCopy copyB);
+            if (usesFullReport)
             {
-                beatA = reportA;
-                beatB = reportB;
+                copyA = fullReportA;
+                copyB = fullReportB;
             }
-            if (beatA.Clip == null && beatB.Clip == null)
+            if (copyA.Clip == null && copyB.Clip == null)
             {
                 double fallbackNow = AudioSettings.dspTime;
-                AudioSettings.GetDSPBufferSize(out int fallbackBuffer, out _);
-                bool timely = AutomaticShotTiming.Classify(boundary, fallbackNow, 0,
-                    AutomaticShotTiming.ProvisionalLateTolerance(fallbackBuffer, sampleRate, _beatSeconds))
-                    != AutomaticShotScheduleResult.TooLate;
-                bool fallback = timely && LocalGunshotAudioProcessor.PlayAutomaticFallback(
-                    _source, _tuning, boundary, shotIndex == 0 ? _sequenceStart : fallbackNow);
-                if (!timely) _shotTiming.CatchUp(fallbackNow, _beatSeconds);
-                if (Plugin.ModConfig?.DiagnosticShotLog.Value == true)
-                    Plugin.Log.LogInfo($"automatic cache cold clip={_clipA?.name ?? _clipB?.name} " +
-                        $"shot={shotIndex} fallbackOriginalBand={fallback} timely={timely}; no delayed replay");
-                return fallback;
+                int fallbackBuffer = AudioRuntimeState.BufferFrames;
+                AutomaticShotScheduleResult coldResult = AutomaticShotTiming.Classify(boundary, fallbackNow, 0,
+                    AutomaticShotTiming.ProvisionalLateTolerance(
+                        fallbackBuffer, sampleRate, _clockInterval, _tuning.AutomaticLateToleranceScale),
+                    AutomaticShotTiming.ProvisionalEarlyTolerance(fallbackBuffer, sampleRate, _clockInterval));
+                bool timely = coldResult != AutomaticShotScheduleResult.TooLate;
+                // A cold cache plays nothing added for this round rather than an
+                // approximation: the pitched copy is the only low-end path. The
+                // clock still has to keep up, so the first warm round is on time.
+                if (!timely) _shotTiming.CatchUp(fallbackNow, _clockInterval);
+                else if (coldResult == AutomaticShotScheduleResult.TooEarly)
+                    _shotTiming.Rebase(fallbackNow + AutomaticShotTiming.ProvisionalEarlyTolerance(
+                        fallbackBuffer, sampleRate, _clockInterval), _clockInterval);
+                DiagnosticShotToken diagnosticShot = context?.DiagnosticShot ?? default;
+                if (DetailedDiagnostics.IsActive(diagnosticShot))
+                    DetailedDiagnostics.Commit(
+                        diagnosticShot,
+                        DiagnosticEventKind.AutomaticTimeline,
+                        $"automatic cache cold clip={_clipA?.name ?? _clipB?.name} " +
+                        $"shot={shotIndex} timely={timely}; no delayed replay");
+                return false;
             }
 
-            LocalGunshotAudioProcessor.RetireAutomaticFallback(_source);
-
             float onsetSeconds = CalculateBlendedOnset(
-                beatA,
-                beatB,
+                copyA,
+                copyB,
                 _source.source1 != null ? _source.source1.volume : 0f,
                 _source.source2 != null ? _source.source2.volume : 0f);
             double requestedStart = boundary + onsetSeconds;
             double now = AudioSettings.dspTime;
-            AudioSettings.GetDSPBufferSize(out int bufferFrames, out _);
+            int bufferFrames = AudioRuntimeState.BufferFrames;
             AutomaticShotScheduleResult scheduleResult = AutomaticShotTiming.Classify(
                 requestedStart,
                 now,
                 MinimumSchedulingLeadSeconds,
                 AutomaticShotTiming.ProvisionalLateTolerance(
-                    bufferFrames, sampleRate, _beatSeconds));
+                    bufferFrames, sampleRate, _clockInterval, _tuning.AutomaticLateToleranceScale),
+                AutomaticShotTiming.ProvisionalEarlyTolerance(bufferFrames, sampleRate, _clockInterval));
             if (scheduleResult == AutomaticShotScheduleResult.TooLate)
             {
-                _shotTiming.CatchUp(now, _beatSeconds);
-                if (Plugin.ModConfig?.DiagnosticShotLog.Value == true)
-                    Plugin.Log.LogWarning(
-                        $"automatic beat skipped shot={shotIndex}: late by " +
+                // The clock moves to the present rather than keeping the missed
+                // boundary, so the copies a stall held back are never released
+                // together behind the rounds they belong to — and a clock that has
+                // drifted ahead of the game is put back on the present here.
+                _shotTiming.Rebase(now, _clockInterval);
+                AutomaticScheduleTrace.Record(AutomaticScheduleOutcome.Dropped);
+                DiagnosticShotToken diagnosticShot = context?.DiagnosticShot ?? default;
+                if (DetailedDiagnostics.IsActive(diagnosticShot))
+                    DetailedDiagnostics.Commit(
+                        diagnosticShot,
+                        DiagnosticEventKind.AutomaticTimeline,
+                        $"automatic copy skipped shot={shotIndex}: late by " +
                         $"{(now + MinimumSchedulingLeadSeconds - requestedStart) * 1000.0:0.0}ms");
                 return false;
             }
+            double earlyBy = 0.0;
+            if (scheduleResult == AutomaticShotScheduleResult.TooEarly)
+            {
+                // The clock is behind the weapon. Pull this round back to the edge
+                // of the budget — never leave it at a boundary that may lie seconds
+                // ahead, after the trigger has been released. The edge rather than
+                // the present: one reading of the audio clock is a buffer coarse,
+                // and anchoring on it would push the next round past the late budget.
+                earlyBy = requestedStart - now;
+                requestedStart = now + MinimumSchedulingLeadSeconds +
+                    AutomaticShotTiming.ProvisionalEarlyTolerance(bufferFrames, sampleRate, _clockInterval);
+                _shotTiming.Rebase(requestedStart - onsetSeconds, _clockInterval);
+            }
             double scheduledStart = AutomaticShotTiming.ResolveStart(
                 requestedStart, now, MinimumSchedulingLeadSeconds, true);
+            // A main-thread stall delivers several FireBullet calls in one frame.
+            // Each is late, so each is clamped to the same earliest start and the
+            // copies would sound as one stack instead of a burst. Keep the first.
+            if (AutomaticShotTiming.CollapsesOntoPreviousStart(
+                scheduledStart, requestedStart, _lastScheduledStart, _clockInterval))
+            {
+                _shotTiming.CatchUp(now, _clockInterval);
+                AutomaticScheduleTrace.Record(AutomaticScheduleOutcome.Collapsed);
+                DiagnosticShotToken collapsedShot = context?.DiagnosticShot ?? default;
+                if (DetailedDiagnostics.IsActive(collapsedShot))
+                    DetailedDiagnostics.Commit(
+                        collapsedShot,
+                        DiagnosticEventKind.AutomaticTimeline,
+                        $"automatic copy dropped shot={shotIndex}: late copies collapsed onto " +
+                        $"{(scheduledStart - _lastScheduledStart) * 1000.0:0.0}ms after the previous start");
+                return false;
+            }
             bool played = PitchedGunshotLayer.PlayCachedAutomaticBeat(
                 _source,
                 _tuning,
                 scheduledStart,
-                beatA,
-                beatB);
-            if (context != null) context.AuthoredTailScheduled = played && completeReport;
-            LastUsesAuthoredTail = played && completeReport;
-
-            if (Plugin.ModConfig?.DiagnosticShotLog.Value == true)
+                copyA,
+                copyB);
+            if (played)
             {
-                Plugin.Log.LogInfo(
-                    $"automatic beat timeline shot={shotIndex} played={played} authoredTail={completeReport} " +
-                    $"beat={_beatSeconds * 1000f:0.0}ms onset={onsetSeconds * 1000f:0.0}ms " +
-                    $"lead={(requestedStart - now) * 1000.0:0.0}ms " +
+                _lastScheduledStart = scheduledStart;
+                if (usesFullReport) AutomaticScheduleTrace.RecordAuthoredReport();
+                AutomaticScheduleTrace.Record(
+                    scheduleResult == AutomaticShotScheduleResult.Scheduled
+                        ? AutomaticScheduleOutcome.Scheduled
+                        : scheduleResult == AutomaticShotScheduleResult.TooEarly
+                            ? AutomaticScheduleOutcome.Early
+                            : AutomaticScheduleOutcome.Late);
+            }
+            if (context != null) context.FullReportScheduled = played && usesFullReport;
+            LastUsedFullReport = played && usesFullReport;
+
+            DiagnosticShotToken timelineDiagnosticShot = context?.DiagnosticShot ?? default;
+            if (DetailedDiagnostics.IsActive(timelineDiagnosticShot))
+            {
+                DetailedDiagnostics.Commit(
+                    timelineDiagnosticShot,
+                    DiagnosticEventKind.AutomaticTimeline,
+                    $"automatic copy timeline shot={shotIndex} played={played} fullReport={usesFullReport} " +
+                    $"beat={_beatSeconds * 1000f:0.0}ms clock={_clockInterval * 1000f:0.0}ms " +
+                    $"observedPace={_shotTiming.FollowsObservedPace} onset={onsetSeconds * 1000f:0.0}ms " +
+                    $"lead={(requestedStart - now) * 1000.0:0.0}ms earlyBy={earlyBy * 1000.0:0.0}ms " +
                     $"schedule={scheduleResult} late={Math.Max(0.0, scheduledStart - requestedStart) * 1000.0:0.0}ms");
             }
             return played;
         }
 
         internal static float CalculateBlendedOnset(
-            CachedAutomaticBeat beatA,
-            CachedAutomaticBeat beatB,
+            CachedAutomaticCopy copyA,
+            CachedAutomaticCopy copyB,
             float volumeA,
             float volumeB)
         {
-            if (beatA.Clip == null)
+            if (copyA.Clip == null)
             {
-                return beatB.OnsetSeconds;
+                return copyB.OnsetSeconds;
             }
-            if (beatB.Clip == null)
+            if (copyB.Clip == null)
             {
-                return beatA.OnsetSeconds;
+                return copyA.OnsetSeconds;
             }
 
             float a = Mathf.Max(0f, volumeA);
             float b = Mathf.Max(0f, volumeB);
             float sum = a + b;
             return sum <= 0.0001f
-                ? Mathf.Min(beatA.OnsetSeconds, beatB.OnsetSeconds)
-                : (beatA.OnsetSeconds * a + beatB.OnsetSeconds * b) / sum;
+                ? Mathf.Min(copyA.OnsetSeconds, copyB.OnsetSeconds)
+                : (copyA.OnsetSeconds * a + copyB.OnsetSeconds * b) / sum;
         }
+
+        private void Awake() => GalSourceCensus.Created(GalComponentKind.BeatTimeline);
+
+        private void OnEnable() => GalSourceCensus.Enabled(GalComponentKind.BeatTimeline);
 
         private void OnDisable()
         {
+            GalSourceCensus.Disabled(GalComponentKind.BeatTimeline);
             StopTimeline();
         }
+
+        private void OnDestroy() => GalSourceCensus.Destroyed(GalComponentKind.BeatTimeline);
     }
 }

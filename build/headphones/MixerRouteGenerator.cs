@@ -9,6 +9,7 @@ using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Audio;
+using GunsAreLoud.Client.Audio;
 
 namespace GAL
 {
@@ -89,6 +90,7 @@ namespace GAL
             SetGroupVolume(controller, passive, 0f);
             for (int band = 1; band <= 9; band++)
                 AddParamEq(controller, passive, band);
+            AddContrastInputs(controller, groups);
 
             object electronics = controllerType.GetMethod("CreateNewGroup", Flags)
                 .Invoke(controller, new object[] { "GAL Electronics", false });
@@ -119,7 +121,39 @@ namespace GAL
             File.WriteAllLines("headphone-mixer-parameters.txt", RequiredParameters());
             File.WriteAllLines("headphone-mixer-repaired-parameters.txt", repairedParameters);
             File.WriteAllLines("headphone-mixer-restored-aliases.txt", restoredAliases);
+            File.WriteAllLines("gunshot-contrast-routes.txt",
+                GunshotContrastMixerRouteTable.Routes.Select(route =>
+                    route.ParentPath + "|" + route.InputPath + "|" + route.Parameter));
             Debug.Log("GAL_HEADPHONE_MIXER_COMPLETE");
+        }
+
+        private static void AddContrastInputs(object controller, IList groups)
+        {
+            Type controllerType = controller.GetType();
+            foreach (ContrastRouteSpec route in GunshotContrastMixerRouteTable.Routes)
+            {
+                object parent = ResolveGroup(groups, "Master/InGame/" + route.ParentPath);
+                object input = controllerType.GetMethod("CreateNewGroup", Flags)
+                    .Invoke(controller, new object[] { ContrastRouteSpec.InputGroupName, false });
+                input.GetType().GetMethod("PreallocateGUIDs", Flags).Invoke(input, null);
+                controllerType.GetMethod("AddChildToParent", Flags)
+                    .Invoke(controller, new[] { input, parent });
+                AddCompiledAttenuation(controller, input);
+                Expose(controller, input, null, "GetGUIDForVolume", null, route.Parameter);
+                SetGroupVolume(controller, input, 0f);
+            }
+        }
+
+        private static object ResolveGroup(IList groups, string path)
+        {
+            string[] parts = path.Split('/');
+            object current = Unique(groups, parts[0]);
+            for (int index = 1; index < parts.Length; index++)
+            {
+                IList children = (IList)current.GetType().GetProperty("children", Flags).GetValue(current);
+                current = Unique(children, parts[index]);
+            }
+            return current;
         }
 
         private static void AddCompiledAttenuation(object controller, object group)
@@ -128,7 +162,7 @@ namespace GAL
             object[] attenuation = effects.Cast<object>().Where(e =>
                 (string)e.GetType().GetProperty("effectName", Flags).GetValue(e) == "Attenuation").ToArray();
             if (attenuation.Length != 1)
-                throw new InvalidOperationException("New GAL Passive group must have exactly one Attenuation effect");
+                throw new InvalidOperationException("New mixer group must have exactly one Attenuation effect");
             // The factory attenuation in an AssetRipper-imported controller is
             // an editor placeholder and the compiler omits it. Insert a normal
             // Unity subasset so the new group volume has an actual DSP fader.
@@ -463,6 +497,9 @@ namespace GAL
             foreach (string parameter in RequiredParameters())
                 if (!mixer.GetFloat(parameter, out _))
                     throw new InvalidOperationException("Missing parameter " + parameter);
+            foreach (ContrastRouteSpec route in GunshotContrastMixerRouteTable.Routes)
+                if (mixer.FindMatchingGroups(route.InputPath).Length != 1)
+                    throw new InvalidOperationException("Missing contrast input " + route.InputPath);
         }
 
         private static string[] RequiredParameters() =>
@@ -480,7 +517,8 @@ namespace GAL
                 "GAL_ElectronicsCeiling", "GAL_ElectronicsWet", "GAL_ElectronicsReset" }
             .Concat(Enumerable.Range(1, 9)
                 .SelectMany(i => new[] { $"GAL_PassiveBand{i}Gain",
-                    $"GAL_PassiveBand{i}Frequency", $"GAL_PassiveBand{i}Q" })).ToArray();
+                    $"GAL_PassiveBand{i}Frequency", $"GAL_PassiveBand{i}Q" }))
+            .Concat(GunshotContrastMixerRouteTable.Routes.Select(route => route.Parameter)).ToArray();
 
         private static object Unique(IList groups, string name)
         {

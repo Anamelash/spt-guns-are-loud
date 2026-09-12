@@ -26,8 +26,8 @@ namespace GunsAreLoud.Tests
             _config.PitchedLayerSemitones.Value = 12f;
             _config.PitchedLayerHighpassHz.Value = 35f;
             _config.PitchedLayerLowpassHz.Value = 260f;
-            _config.LowEndNormalizationPercent.Value = 100f;
-            _config.CaliberContrastPercent.Value = 100f;
+            _config.LowEndNormalizationDb.Value = ModConfig.LowEndNormalizationSpanDb;
+            _config.CartridgeContrastDb.Value = ModConfig.CartridgeContrastSpanDb;
             LowEndNormalizationCache.Clear();
         }
 
@@ -65,7 +65,7 @@ namespace GunsAreLoud.Tests
         private LocalGunshotAudioTuning AudioTuning(bool normalizeBass = false)
         {
             TuningSnapshot t = _config.GetTuning();
-            return new LocalGunshotAudioTuning(0, 0.3f, 99, GunshotLowEndMode.PitchedCopy,
+            return new LocalGunshotAudioTuning(0, 0.3f, 99,
                 AutomaticPitchedRoute.CachedReport, t.PitchedLayerSemitones,
                 t.PitchedLayerHighpassHz, t.PitchedLayerLowpassHz, t.PitchedLayerFadePercent,
                 t.AutomaticPitchedTailSeconds, t.PitchedLayerGainDb, t.PitchedLayerOcclusion,
@@ -182,7 +182,7 @@ namespace GunsAreLoud.Tests
         public void ZeroPercentIsExactBodyAndDecayBypass()
         {
             WarmDynamics(BodyAndDecay(0.59354f, 0.01397f));
-            _config.LowEndNormalizationPercent.Value = 0;
+            _config.LowEndNormalizationDb.Value = 0;
             LowEndNormalizationResult result = LowEndNormalizationCache.Evaluate(1, AudioTuning());
             Assert.That(result.Ready, Is.True);
             Assert.That(result.BodyGain, Is.EqualTo(1f));
@@ -378,6 +378,22 @@ namespace GunsAreLoud.Tests
         }
 
         [Test]
+        public void CompletedNormalizationWorkLeavesNoPerFrameSourceScan()
+        {
+            LowEndNormalizationCache.Register(1, Rate, Tone(0.1f), 1, 0);
+            LowEndNormalizationCache.Register(2, Rate, Tone(0.2f), 1, 0);
+            Assert.That(LowEndNormalizationCache.PendingCount, Is.EqualTo(2));
+            for (int pass = 0; pass < 8 && LowEndNormalizationCache.PendingCount > 0; pass++)
+                LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Assert.That(LowEndNormalizationCache.PendingCount, Is.Zero);
+            int measurements = LowEndNormalizationCache.MeasurementCount;
+            for (int pass = 0; pass < 100; pass++)
+                LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Assert.That(LowEndNormalizationCache.MeasurementCount, Is.EqualTo(measurements));
+            Assert.That(LowEndNormalizationCache.PendingCount, Is.Zero);
+        }
+
+        [Test]
         public void GainFadeAndOcclusionEditsDoNotGetNormalizedAway()
         {
             RegisterPair();
@@ -387,7 +403,6 @@ namespace GunsAreLoud.Tests
             _config.PitchedLayerFadePercent.Value = 100;
             _config.PitchedLayerOcclusion.Value = PitchedLayerOcclusionMode.Enhanced;
             _config.PitchedLayerOccludedLowpassHz.Value = 50;
-            _config.IndoorHeadphonesDampingPercent.Value = 200;
             _config.HeadphonesFit.Value = HeadphonesFitPreset.Tight;
             LowEndNormalizationCache.Refresh(_config.GetTuning());
             Assert.That(LowEndNormalizationCache.Gain(1, AudioTuning(), out _), Is.EqualTo(before));
@@ -461,17 +476,17 @@ namespace GunsAreLoud.Tests
                 Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".cfg"), false)
                 { SaveOnConfigSet = false });
 
-            Assert.That(release.LowEndNormalizationPercent.Value, Is.EqualTo(100));
-            Assert.That(release.CaliberContrastPercent.Value, Is.EqualTo(200));
+            Assert.That(release.LowEndNormalizationDb.Value, Is.EqualTo(12));
+            Assert.That(release.CartridgeContrastDb.Value, Is.EqualTo(6));
             Assert.That(release.PitchedLayerLowpassHz.Value, Is.EqualTo(2000));
             Assert.That(release.AutomaticPitchedTailMs.Value, Is.EqualTo(30));
-            Assert.That(((AcceptableValueRange<float>)release.LowEndNormalizationPercent.Description.AcceptableValues).MaxValue, Is.EqualTo(150));
-            Assert.That(((AcceptableValueRange<float>)release.CaliberContrastPercent.Description.AcceptableValues).MaxValue, Is.EqualTo(300));
+            Assert.That(((AcceptableValueRange<float>)release.LowEndNormalizationDb.Description.AcceptableValues).MaxValue, Is.EqualTo(18));
+            Assert.That(((AcceptableValueRange<float>)release.CartridgeContrastDb.Description.AcceptableValues).MaxValue, Is.EqualTo(9));
             Assert.That(((AcceptableValueRange<float>)release.PitchedLayerLowpassHz.Description.AcceptableValues).MaxValue, Is.EqualTo(3000));
             Assert.That(((AcceptableValueRange<float>)release.AutomaticPitchedTailMs.Description.AcceptableValues).MaxValue, Is.EqualTo(600));
 
-            release.LowEndNormalizationPercent.Value = 150;
-            release.CaliberContrastPercent.Value = 300;
+            release.LowEndNormalizationDb.Value = 18;
+            release.CartridgeContrastDb.Value = 9;
             release.PitchedLayerLowpassHz.Value = 3000;
             release.AutomaticPitchedTailMs.Value = 600;
             TuningSnapshot maximum = release.GetTuning();
@@ -535,6 +550,93 @@ namespace GunsAreLoud.Tests
             LowEndNormalizationResult result = LowEndNormalizationCache.Evaluate(1, AudioTuning());
             Assert.That(result.TargetRms, Is.EqualTo(target));
             Assert.That(result.MeasuredRms * result.Gain, Is.EqualTo(target).Within(0.00001));
+        }
+
+        private static float[] FullPrefixTone(float amplitude)
+        {
+            // Longer than the retained analysis prefix, so one registration
+            // costs the full per-source budget after truncation.
+            var pcm = new float[(int)(Rate * 1.3f) * 2];
+            for (int frame = 0; frame < pcm.Length / 2; frame++)
+                pcm[frame * 2] = pcm[frame * 2 + 1] =
+                    amplitude * (float)Math.Sin(2 * Math.PI * 280f * frame / Rate);
+            return pcm;
+        }
+
+        private void Drain()
+        {
+            // The first pass is unconditional: it is what publishes an F12 band
+            // change, and only then is there anything pending to measure.
+            TuningSnapshot tuning = _config.GetTuning();
+            for (int pass = 0; pass < 64; pass++)
+            {
+                LowEndNormalizationCache.Refresh(tuning);
+                if (LowEndNormalizationCache.PendingCount == 0) break;
+            }
+        }
+
+        // One registration retains the truncated analysis prefix, so the number
+        // of sources that fit is fixed. Looping on the counter itself would
+        // never end: trimming keeps it just under the budget by construction.
+        private const int PrefixSamples = (int)(Rate * 1.25f) * 2;
+
+        private int FillToRetentionBudget()
+        {
+            int capacity = (int)(LowEndNormalizationCache.MaximumRetainedSamples / PrefixSamples);
+            for (int id = 1; id <= capacity; id++)
+            {
+                LowEndNormalizationCache.Register(id, Rate, FullPrefixTone(0.1f), 1, 0);
+                Drain();
+            }
+            return capacity;
+        }
+
+        [Test]
+        public void AnalysisPrefixesStayWithinTheRetentionBudget()
+        {
+            int registered = FillToRetentionBudget();
+            LowEndNormalizationCache.Register(registered + 1, Rate, FullPrefixTone(0.1f), 1, 0);
+            Drain();
+
+            Assert.That(registered, Is.GreaterThan(1));
+            Assert.That(LowEndNormalizationCache.RetainedSamples,
+                Is.LessThanOrEqualTo(LowEndNormalizationCache.MaximumRetainedSamples));
+            Assert.That(LowEndNormalizationCache.SourceCount, Is.EqualTo(registered + 1));
+        }
+
+        [Test]
+        public void ReleasingAPrefixKeepsTheMeasurementItAlreadyPublished()
+        {
+            int registered = FillToRetentionBudget();
+            LowEndNormalizationResult before = LowEndNormalizationCache.Evaluate(1, AudioTuning());
+            LowEndNormalizationCache.Register(registered + 1, Rate, FullPrefixTone(0.1f), 1, 0);
+            Drain();
+            LowEndNormalizationResult after = LowEndNormalizationCache.Evaluate(1, AudioTuning());
+
+            Assert.That(before.Ready, Is.True);
+            Assert.That(after.Ready, Is.True);
+            Assert.That(after.Gain, Is.EqualTo(before.Gain));
+            Assert.That(LowEndNormalizationCache.Evaluate(registered + 1, AudioTuning()).Ready, Is.True);
+        }
+
+        [Test]
+        public void ReleasedPrefixFallsBackToNeutralInsteadOfAStaleBandMeasurement()
+        {
+            int registered = FillToRetentionBudget();
+            LowEndNormalizationCache.Register(registered + 1, Rate, FullPrefixTone(0.1f), 1, 0);
+            Drain();
+
+            _config.PitchedLayerHighpassHz.Value = 71.26761f;
+            _config.PitchedLayerLowpassHz.Value = 683.9437f;
+            Drain();
+
+            LowEndNormalizationResult released = LowEndNormalizationCache.Evaluate(1, AudioTuning());
+            LowEndNormalizationResult retained =
+                LowEndNormalizationCache.Evaluate(registered + 1, AudioTuning());
+
+            Assert.That(released.Ready, Is.False, "A prefix that can no longer be re-measured must not report a stale band.");
+            Assert.That(released.Gain, Is.EqualTo(1f));
+            Assert.That(retained.Ready, Is.True, "A prefix still inside the budget re-measures for the new band.");
         }
 
         [TestCase("545x39", 0, 0)]

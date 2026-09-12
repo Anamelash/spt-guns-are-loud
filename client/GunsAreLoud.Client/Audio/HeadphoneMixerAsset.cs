@@ -23,19 +23,31 @@ namespace GunsAreLoud.Client.Audio
         private static AudioMixer _mixer;
         private static bool _attempted;
         private static HeadphoneGlobalControlBridge _globalControls;
+        internal static GunshotContrastMixerRouter ContrastRoutes { get; private set; }
         private static float _nextControlLog;
+        private static float _nextControlSync;
         private static string _lastControlLog;
+        // Twelve mixer parameter reads and writes. A menu slider does not need
+        // them every frame; ten times a second still tracks a drag, and keeps the
+        // in-game fade this also mirrors from stepping audibly.
+        internal const float ControlSyncIntervalSeconds = 0.1f;
+
         internal static void SyncGlobalControls()
         {
             if (_globalControls == null || _mixer == null) return;
+            if (Time.unscaledTime < _nextControlSync) return;
+            _nextControlSync = Time.unscaledTime + ControlSyncIntervalSeconds;
             bool ok = _globalControls.Tick();
             if (Time.unscaledTime < _nextControlLog) return;
             _nextControlLog = Time.unscaledTime + 1f;
             _mixer.GetFloat("nvqIkjL", out float inGame);
             _mixer.GetFloat("OtWVUHN", out float master);
+            _mixer.GetFloat("mposwoH", out float music);
+            _mixer.GetFloat("OnQSOHH", out float hideout);
             _mixer.GetFloat("MainVolume", out float main);
             _mixer.GetFloat("GunsVolume", out float guns);
-            string value = $"bridge={ok} InGame={inGame:0.0}dB Master={master:0.0}dB Main={main:0.0}dB Guns={guns:0.0}dB";
+            string value = $"bridge={ok} InGame={inGame:0.0}dB Master={master:0.0}dB " +
+                $"Music={music:0.0}dB Hideout={hideout:0.0}dB Main={main:0.0}dB Guns={guns:0.0}dB";
             if (value == _lastControlLog) return;
             _lastControlLog = value;
             Plugin.Log?.LogInfo("Headphone global mixer controls: " + value);
@@ -95,7 +107,17 @@ namespace GunsAreLoud.Client.Audio
                     "World/GAL Electronics" })
                     if (candidate.FindMatchingGroups(path).Length == 0)
                         throw new InvalidOperationException("headphone route group missing: " + path);
+                // Contrast routing is an optimisation over the per-source filter
+                // fallback, not part of the headphone contract. An incomplete
+                // route table must not cost the player the whole headphone path.
+                bool contrastReady = GunshotContrastMixerRouter.TryCreate(
+                    candidate, out GunshotContrastMixerRouter contrastRoutes, out string contrastFailure);
+                if (!contrastReady)
+                    Plugin.Log?.LogWarning(
+                        "Gunshot contrast mixer routes unavailable; per-source fallback filters will be used: " +
+                        contrastFailure);
                 _mixer = candidate;
+                ContrastRoutes = contrastReady ? contrastRoutes : null;
                 _globalControls = new HeadphoneGlobalControlBridge(
                     new Runtime.UnityMixerParameterStore(original), new Runtime.UnityMixerParameterStore(candidate));
                 if (!_globalControls.Tick()) throw new InvalidOperationException("global mixer control bridge initialization failed");
@@ -111,6 +133,7 @@ namespace GunsAreLoud.Client.Audio
                 _bundle = null;
                 _mixer = null;
                 _globalControls = null;
+                ContrastRoutes = null;
                 return null;
             }
         }

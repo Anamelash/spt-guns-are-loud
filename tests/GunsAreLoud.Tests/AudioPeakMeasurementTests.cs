@@ -110,9 +110,14 @@ namespace GunsAreLoud.Tests
             invalid[0] = float.NaN;
             processor.ProcessAudioBufferForTests(invalid, 1);
 
-            Assert.That(float.IsNaN(invalid[0]), Is.True);
+            // The probe measures and changes nothing, but the limiter is the last
+            // stage on every master buffer and owns what reaches the output: a
+            // sample that is not a number is replaced there rather than handed on.
+            Assert.That(float.IsNaN(invalid[0]), Is.False);
+            Assert.That(invalid[0], Is.Zero);
             Assert.That(processor.TryTakeMasterProbe(out ListenerBandTelemetry first), Is.True);
-            Assert.That(first.NonFiniteCount, Is.EqualTo(1));
+            Assert.That(first.NonFiniteCount, Is.EqualTo(1),
+                "…and the diagnostics still record that it arrived.");
 
             processor.ArmMasterProbe(AutomaticPitchedRoute.BuiltInDSP, false, 8000);
             var silence = new float[1920];
@@ -140,6 +145,24 @@ namespace GunsAreLoud.Tests
             Assert.That(telemetry.RmsTotal, Is.EqualTo(0.70710678f).Within(0.000001f));
             Assert.That(telemetry.NonFiniteCount, Is.EqualTo(1920));
             Assert.That(telemetry.ChannelsMeasured, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void CancellingDiagnosticsAbandonsOldProbeSetAndAllowsCleanRearm()
+        {
+            HearingImpactProcessor processor = UninitializedProcessor();
+            int abandoned = processor.ArmMasterProbe(
+                AutomaticPitchedRoute.BuiltInDSP, false, 8000);
+            processor.CancelMasterProbes();
+            processor.ProcessAudioBufferForTests(new float[1920], 1);
+            Assert.That(processor.TryTakeMasterProbe(out _), Is.False);
+
+            int current = processor.ArmMasterProbe(
+                AutomaticPitchedRoute.BuiltInDSP, false, 8000);
+            processor.ProcessAudioBufferForTests(new float[1920], 1);
+            Assert.That(processor.TryTakeMasterProbe(out ListenerBandTelemetry telemetry), Is.True);
+            Assert.That(telemetry.ProbeId, Is.EqualTo(current));
+            Assert.That(telemetry.ProbeId, Is.Not.EqualTo(abandoned));
         }
 
         private static HearingImpactProcessor UninitializedProcessor()

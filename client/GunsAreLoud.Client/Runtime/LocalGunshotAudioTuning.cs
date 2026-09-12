@@ -9,9 +9,10 @@ namespace GunsAreLoud.Client.Runtime
         internal readonly float DirectBoostDb;
         internal readonly float DirectBodyGain;
         internal readonly float PressureFrequencyHz;
-        internal readonly GunshotLowEndMode LowEndMode;
         internal readonly AutomaticPitchedRoute AutomaticPitchedRoute;
         internal readonly AutomaticTailMode AutomaticTailMode;
+        internal readonly float AutomaticReportOverlapShots;
+        internal readonly float AutomaticLateToleranceScale;
         internal readonly float PitchedLayerSemitones;
         internal readonly float PitchedLayerHighpassHz;
         internal readonly float PitchedLayerLowpassHz;
@@ -34,7 +35,6 @@ namespace GunsAreLoud.Client.Runtime
             float directBoostDb,
             float directBodyGain,
             float pressureFrequencyHz,
-            GunshotLowEndMode lowEndMode,
             AutomaticPitchedRoute automaticPitchedRoute,
             float pitchedLayerSemitones,
             float pitchedLayerHighpassHz,
@@ -53,15 +53,18 @@ namespace GunsAreLoud.Client.Runtime
             AutomaticTailMode automaticTailMode = AutomaticTailMode.FullReportPerShot,
             float lowEndNormalizationPercent = 0f,
             float caliberContrastPercent = 100f,
-            IndoorHeadphonesDamping headphonesDamping = default, bool normalizeBass = false)
+            IndoorHeadphonesDamping headphonesDamping = default, bool normalizeBass = false,
+            float automaticReportOverlapShots = 6f,
+            float automaticLateToleranceScale = 1f)
         {
             NormalizeBass = normalizeBass;
             DirectBoostDb = directBoostDb;
             DirectBodyGain = directBodyGain;
             PressureFrequencyHz = pressureFrequencyHz;
-            LowEndMode = lowEndMode;
             AutomaticPitchedRoute = automaticPitchedRoute;
             AutomaticTailMode = automaticTailMode;
+            AutomaticReportOverlapShots = automaticReportOverlapShots;
+            AutomaticLateToleranceScale = automaticLateToleranceScale;
             PitchedLayerSemitones = pitchedLayerSemitones;
             PitchedLayerHighpassHz = pitchedLayerHighpassHz;
             PitchedLayerLowpassHz = pitchedLayerLowpassHz;
@@ -86,11 +89,16 @@ namespace GunsAreLoud.Client.Runtime
     {
         internal readonly LocalGunshotAudioTuning Value;
         internal readonly AutomaticShotContext Context;
+        internal readonly DiagnosticShotToken DiagnosticShot;
 
-        internal LocalGunshotAudioTuningBox(LocalGunshotAudioTuning value, AutomaticShotContext context = null)
+        internal LocalGunshotAudioTuningBox(
+            LocalGunshotAudioTuning value,
+            AutomaticShotContext context = null,
+            DiagnosticShotToken diagnosticShot = default)
         {
             Value = value;
             Context = context;
+            DiagnosticShot = diagnosticShot;
         }
     }
 
@@ -98,13 +106,17 @@ namespace GunsAreLoud.Client.Runtime
     // a later burst cannot suppress an earlier burst's fallback tail.
     internal sealed class AutomaticShotContext
     {
-        internal bool AuthoredTailScheduled;
+        internal bool FullReportScheduled;
         internal readonly AutomaticBurstRouting Routing;
-        internal bool ShouldPlayReleaseCopy => !AuthoredTailScheduled;
+        internal readonly DiagnosticShotToken DiagnosticShot;
+        internal bool ShouldPlayReleaseCopy => !FullReportScheduled;
 
-        internal AutomaticShotContext(AutomaticBurstRouting routing = null)
+        internal AutomaticShotContext(
+            AutomaticBurstRouting routing = null,
+            DiagnosticShotToken diagnosticShot = default)
         {
             Routing = routing ?? new AutomaticBurstRouting();
+            DiagnosticShot = diagnosticShot;
         }
     }
 
@@ -112,7 +124,6 @@ namespace GunsAreLoud.Client.Runtime
     {
         internal bool BurstEnded;
         internal SuperSource BodySource;
-        internal GunshotLowEndMode LastLowEndMode;
         internal AutomaticPitchedRoute LastPitchedRoute;
         internal bool RouteInitialized;
     }
@@ -123,7 +134,8 @@ namespace GunsAreLoud.Client.Runtime
             new ConditionalWeakTable<SuperAudioSample, LocalGunshotAudioTuningBox>();
 
         internal static void Register(SuperAudioSample sample, LocalGunshotAudioTuning tuning,
-            AutomaticShotContext context = null)
+            AutomaticShotContext context = null,
+            DiagnosticShotToken diagnosticShot = default)
         {
             if (sample == null)
             {
@@ -131,14 +143,26 @@ namespace GunsAreLoud.Client.Runtime
             }
 
             Samples.Remove(sample);
-            Samples.Add(sample, new LocalGunshotAudioTuningBox(tuning, context));
+            Samples.Add(sample, new LocalGunshotAudioTuningBox(tuning, context, diagnosticShot));
+        }
+
+        /// <summary>
+        /// Drops any registration on this sample. EFT re-issues sample objects
+        /// from its queue, so a tag left by a shot that never played must not make
+        /// the next sound on the same object look like ours.
+        /// </summary>
+        internal static void Forget(SuperAudioSample sample)
+        {
+            if (sample != null) Samples.Remove(sample);
         }
 
         internal static bool TryTake(SuperAudioSample sample, out LocalGunshotAudioTuning tuning,
-            out AutomaticShotContext context)
+            out AutomaticShotContext context,
+            out DiagnosticShotToken diagnosticShot)
         {
             tuning = default;
             context = null;
+            diagnosticShot = default;
             if (sample == null || !Samples.TryGetValue(sample, out LocalGunshotAudioTuningBox boxed))
             {
                 return false;
@@ -147,7 +171,14 @@ namespace GunsAreLoud.Client.Runtime
             Samples.Remove(sample);
             tuning = boxed.Value;
             context = boxed.Context;
+            diagnosticShot = boxed.DiagnosticShot;
             return true;
         }
+
+        internal static bool TryTake(
+            SuperAudioSample sample,
+            out LocalGunshotAudioTuning tuning,
+            out AutomaticShotContext context) =>
+            TryTake(sample, out tuning, out context, out _);
     }
 }

@@ -33,8 +33,7 @@ namespace GunsAreLoud.Client.Runtime
         {
             Interlocked.Exchange(ref _tuningDirty, 1);
             if (!_config.Enabled.Value) Interlocked.Exchange(ref _resetExposureDirty, 1);
-            else if (!ModConfig.IsResponseEnabled(ModConfig.NormalizeResponseControl(_config.HearingTrauma.Value)) &&
-                !ModConfig.IsResponseEnabled(ModConfig.NormalizeResponseControl(_config.Ringing.Value)))
+            else if (!_config.HearingLossActive && !_config.RingingActive)
                 Interlocked.CompareExchange(ref _resetExposureDirty, 2, 0);
 
         }
@@ -60,12 +59,13 @@ namespace GunsAreLoud.Client.Runtime
             TuningSnapshot tuning = state.Tuning;
             EnsureListenerProcessor(force: true);
             int masterProbeId = 0;
-            if (_config.DiagnosticShotLog.Value && _processor != null)
+            if (DetailedDiagnostics.IsActive(state.DiagnosticShot) && _processor != null)
             {
                 masterProbeId = _processor.ArmMasterProbe(
                     tuning.AutomaticPitchedRoute,
                     state.AudioTuning.PitchedLayerLoopBeatSeconds > 0.001f,
-                    AudioSettings.outputSampleRate);
+                    AudioRuntimeState.OutputSampleRate,
+                    state.DiagnosticShot);
             }
 
             if (tuning.ExposureEnabled)
@@ -73,20 +73,17 @@ namespace GunsAreLoud.Client.Runtime
                 ExposureState.Add(result.LeftDose, result.RightDose, tuning);
             }
 
-            if (_config.DiagnosticShotLog.Value)
+            if (DetailedDiagnostics.IsActive(state.DiagnosticShot))
             {
                 float bodyFrequency = DirectLoudnessModel.CalculatePressureFrequencyHz(result, tuning);
-                float bodyBandGain = tuning.LowEndMode == GunshotLowEndMode.OriginalBand
-                    ? LocalGunshotImpactFilter.CalculateBodyBandGain(state.DirectBodyGain, bodyFrequency)
-                    : 0f;
-                float pitchedLayerGain = tuning.LowEndMode == GunshotLowEndMode.PitchedCopy
-                    ? PitchedGunshotLayer.CalculateLayerGain(
+                float pitchedLayerGain = PitchedGunshotLayer.CalculateLayerGain(
                         state.DirectBodyGain,
                         bodyFrequency,
                         tuning.PitchedLayerGainDb,
-                        tuning.CaliberContrastPercent)
-                    : 0f;
-                Plugin.Log.LogInfo(
+                        tuning.CaliberContrastPercent);
+                DetailedDiagnostics.Commit(
+                    state.DiagnosticShot,
+                    DiagnosticEventKind.LocalShot,
                     $"shot caliber={shot.AmmoCaliber} class={shot.WeaponClass} " +
                     $"energy={0.5f * shot.BulletMassGram / 1000f * shot.MuzzleVelocity * shot.MuzzleVelocity:0}J " +
                     $"mods={shot.SummedModLoudness:+#;-#;0} suppressed={shot.IsSuppressed} " +
@@ -100,9 +97,7 @@ namespace GunsAreLoud.Client.Runtime
                     $"headphoneTailDecay={state.AudioTuning.HeadphonesDamping.TailDbPerSecond:0.0}dB/s " +
                     $"headphoneReverbCut={state.AudioTuning.HeadphonesDamping.ReverbAttenuationDb:0.0}dB " +
                     $"directBoost={state.DirectBoostDb:0.0}dB body={state.DirectBodyGain:0.00} " +
-                    $"lowEndMode={tuning.LowEndMode} autoRoute={tuning.AutomaticPitchedRoute} " +
-                    $"masterProbe={masterProbeId} bodyBand={bodyBandGain:0.00} " +
-                    $"bodyCutoff={LocalGunshotImpactFilter.CalculateBodyUpperCutoff(bodyFrequency):0}Hz " +
+                    $"autoRoute={tuning.AutomaticPitchedRoute} masterProbe={masterProbeId} " +
                     $"pitchedLayer={pitchedLayerGain:0.00} " +
                     $"audioSamples={state.TunedAudioSamples} severity={result.FinalSeverity:0.000} " +
                     $"doseL={ExposureState.LeftDose:0.000} doseR={ExposureState.RightDose:0.000}");
@@ -146,8 +141,13 @@ namespace GunsAreLoud.Client.Runtime
             // Preserve the first 120 ms of the arriving bang, then ramp physiology over 100 ms.
             _blasts.Add(Time.unscaledTime + Mathf.Max(0, distance) / 340f + .12f, severity,
                 _config.BlastHearingDuration.Value, _config.BlastRingingDuration.Value, _config.BlastSevereDuration.Value, .1f);
-            if (_config.DiagnosticShotLog.Value)
-                Plugin.Log.LogInfo($"blast exposure distance={distance:0.0}m sourceIndoor={sourceIndoor} listenerIndoor={player.Environment == EnvironmentType.Indoor} indoor={indoor} transmission={transmission:0.000} protection={protection:0.0}dB severity={severity:0.000} severe={severity >= .999f} severeSeconds={_config.BlastSevereDuration.Value:0}");
+            if (DetailedDiagnostics.TryBegin(
+                DiagnosticEventKind.Grenade, out DiagnosticReservation reservation))
+                DetailedDiagnostics.Commit(
+                    reservation,
+                    $"blast exposure distance={distance:0.0}m sourceIndoor={sourceIndoor} listenerIndoor={player.Environment == EnvironmentType.Indoor} indoor={indoor} transmission={transmission:0.000} protection={protection:0.0}dB severity={severity:0.000} severe={severity >= .999f} severeSeconds={_config.BlastSevereDuration.Value:0} " +
+                    $"ringPeak={BlastExposureState.RingLevel(severity, _config.BlastRingingStrength.Value, HearingResponseModel.TinnitusCeiling(_config.GetTuning())):0.0000} " +
+                    $"gunshotRingCeiling={HearingResponseModel.TinnitusCeiling(_config.GetTuning()):0.0000}");
         }
 
         internal void Shutdown()
@@ -164,6 +164,11 @@ namespace GunsAreLoud.Client.Runtime
             _listener = null;
         }
 
+        internal void CancelDiagnosticProbes()
+        {
+            _processor?.CancelMasterProbes();
+        }
+
         private void Update()
         {
             using (PerformanceTrace.Measure(PerformanceArea.Hearing))
@@ -175,10 +180,13 @@ namespace GunsAreLoud.Client.Runtime
 
                 EnsureListenerProcessor();
 
-                if (!_reportedCompatibility && _config.DiagnosticShotLog.Value)
+                if (!_reportedCompatibility && DetailedDiagnostics.Enabled)
                 {
                     _reportedCompatibility = true;
-                    Plugin.Log.LogInfo(
+                    if (DetailedDiagnostics.TryBegin(
+                        DiagnosticEventKind.Warning, out DiagnosticReservation reservation))
+                        DetailedDiagnostics.Commit(
+                            reservation,
                         ShotDescriptorFactory.CompatibilityAvailable
                             ? "compatibility: BaseSoundPlayer.playersBridge resolved"
                             : "compatibility: BaseSoundPlayer.playersBridge missing; local-shot modules are disabled");
@@ -208,14 +216,17 @@ namespace GunsAreLoud.Client.Runtime
 
         private void DrainMasterProbeLogs()
         {
-            if (_processor == null || !_config.DiagnosticShotLog.Value)
+            if (_processor == null || !DetailedDiagnostics.Enabled)
             {
                 return;
             }
 
             while (_processor.TryTakeMasterProbe(out ListenerBandTelemetry telemetry))
             {
-                Plugin.Log.LogInfo(
+                if (!DetailedDiagnostics.IsActive(telemetry.DiagnosticShot)) continue;
+                DetailedDiagnostics.Commit(
+                    telemetry.DiagnosticShot,
+                    DiagnosticEventKind.ListenerProbe,
                     $"listener audio probe={telemetry.ProbeId} stage=post-hearing " +
                     $"autoBank={telemetry.AutomaticBank} autoRoute={telemetry.Route} " +
                     $"windowAnchor={telemetry.WindowAnchor} concurrentAudio={telemetry.IncludesConcurrentAudio} " +
@@ -265,9 +276,12 @@ namespace GunsAreLoud.Client.Runtime
                 _processor = _listener.gameObject.AddComponent<HearingImpactProcessor>();
             }
 
-            if (_config.DiagnosticShotLog.Value)
+            if (DetailedDiagnostics.TryBegin(
+                DiagnosticEventKind.ListenerProbe, out DiagnosticReservation reservation))
             {
-                Plugin.Log.LogInfo($"listener processor attached to {_listener.gameObject.name}");
+                DetailedDiagnostics.Commit(
+                    reservation,
+                    $"listener processor attached to {_listener.gameObject.name}");
             }
         }
 
@@ -287,27 +301,84 @@ namespace GunsAreLoud.Client.Runtime
                 ExposureState.LeftDose,
                 ExposureState.RightDose,
                 tuning,
-                AudioSettings.outputSampleRate);
+                AudioRuntimeState.OutputSampleRate);
 
             var blast = _blasts.Sample(Time.unscaledTime);
-            float loss = Mathf.Clamp01(blast.Hearing * _config.BlastHearingStrength.Value / 100f);
-            float ring = Mathf.Min(.02f, blast.Ringing * .008f * _config.BlastRingingStrength.Value / 100f);
+            // The General toggles cover explosions too, not only own gunfire.
+            float loss = _config.HearingLossEnabled.Value
+                ? Mathf.Clamp01(blast.Hearing * _config.BlastHearingStrength.Value / 100f)
+                : 0f;
+            float ring = _config.RingingEnabled.Value
+                ? BlastExposureState.RingLevel(
+                    blast.Ringing,
+                    _config.BlastRingingStrength.Value,
+                    HearingResponseModel.TinnitusCeiling(tuning))
+                : 0f;
             float attenuation = (blast.Severe ? 60f : 35f) * loss;
-            float cutoff = Mathf.Lerp(AudioSettings.outputSampleRate * .49f, 350f, loss);
+            int sampleRate = AudioRuntimeState.OutputSampleRate;
+            float cutoff = Mathf.Lerp(sampleRate * .49f, 350f, loss);
+            bool enabled = response.ProcessingActive || loss > .0001f || ring > .000001f;
+            float wetLeft = loss > 0 ? 1f : response.HearingLeft;
+            float wetRight = loss > 0 ? 1f : response.HearingRight;
+            float attenuationLeft = Mathf.Max(response.AttenuationLeftDb, attenuation);
+            float attenuationRight = Mathf.Max(response.AttenuationRightDb, attenuation);
+            float cutoffLeft = Mathf.Min(response.CutoffLeftHz, cutoff);
+            float cutoffRight = Mathf.Min(response.CutoffRightHz, cutoff);
+            float tinnitusLeft = Mathf.Max(response.TinnitusLeft, ring);
+            float tinnitusRight = Mathf.Max(response.TinnitusRight, ring);
+            // Recovery is a continuous curve, but between shots and once it has
+            // settled the targets repeat exactly. Publishing them again costs two
+            // exponentials and two powers per frame for an identical result.
+            if (_hasTargets && ReferenceEquals(_targetProcessor, _processor) &&
+                _lastEnabled == enabled &&
+                _lastWetLeft == wetLeft && _lastWetRight == wetRight &&
+                _lastAttenuationLeft == attenuationLeft && _lastAttenuationRight == attenuationRight &&
+                _lastCutoffLeft == cutoffLeft && _lastCutoffRight == cutoffRight &&
+                _lastTinnitusLeft == tinnitusLeft && _lastTinnitusRight == tinnitusRight &&
+                _lastTinnitusFrequency == tuning.TinnitusFrequencyHz &&
+                _lastTinnitusSpread == tuning.TinnitusPitchSpreadHz &&
+                _lastSampleRate == sampleRate)
+                return;
+            _hasTargets = true;
+            _targetProcessor = _processor;
+            _lastEnabled = enabled;
+            _lastWetLeft = wetLeft;
+            _lastWetRight = wetRight;
+            _lastAttenuationLeft = attenuationLeft;
+            _lastAttenuationRight = attenuationRight;
+            _lastCutoffLeft = cutoffLeft;
+            _lastCutoffRight = cutoffRight;
+            _lastTinnitusLeft = tinnitusLeft;
+            _lastTinnitusRight = tinnitusRight;
+            _lastTinnitusFrequency = tuning.TinnitusFrequencyHz;
+            _lastTinnitusSpread = tuning.TinnitusPitchSpreadHz;
+            _lastSampleRate = sampleRate;
             _processor.SetTargets(
-                response.ProcessingActive || loss > .0001f || ring > .000001f,
-                loss > 0 ? 1f : response.HearingLeft,
-                loss > 0 ? 1f : response.HearingRight,
-                Mathf.Max(response.AttenuationLeftDb, attenuation),
-                Mathf.Max(response.AttenuationRightDb, attenuation),
-                Mathf.Min(response.CutoffLeftHz, cutoff),
-                Mathf.Min(response.CutoffRightHz, cutoff),
-                Mathf.Max(response.TinnitusLeft, ring),
-                Mathf.Max(response.TinnitusRight, ring),
+                enabled,
+                wetLeft,
+                wetRight,
+                attenuationLeft,
+                attenuationRight,
+                cutoffLeft,
+                cutoffRight,
+                tinnitusLeft,
+                tinnitusRight,
                 tuning.TinnitusFrequencyHz,
                 tuning.TinnitusPitchSpreadHz,
-                AudioSettings.outputSampleRate);
+                sampleRate);
         }
+
+        // The published targets are only a cache of what the processor was last
+        // told. Anything that changes its state behind this controller's back
+        // must drop it.
+        private HearingImpactProcessor _targetProcessor;
+        private bool _hasTargets, _lastEnabled;
+        private float _lastWetLeft, _lastWetRight;
+        private float _lastAttenuationLeft, _lastAttenuationRight;
+        private float _lastCutoffLeft, _lastCutoffRight;
+        private float _lastTinnitusLeft, _lastTinnitusRight;
+        private float _lastTinnitusFrequency, _lastTinnitusSpread;
+        private int _lastSampleRate;
 
         private void ResetEffect()
         {
@@ -315,6 +386,7 @@ namespace GunsAreLoud.Client.Runtime
             _blasts?.Reset();
             _blastPlayer = null;
             _processor?.ImmediateBypass();
+            _hasTargets = false;
         }
 
         private void ConsumePendingReset()

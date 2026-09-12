@@ -78,5 +78,36 @@ namespace GunsAreLoud.Tests
             callback(samples, 2);
             Assert.That(PerformanceTrace.AudioCallbacks, Is.EqualTo(2));
         }
+
+        [Test]
+        public void FrameHistogramReportsBoundedPercentilesWithoutSamplesAllocations()
+        {
+            var histogram = new FrameTimeHistogram();
+            for (int value = 1; value <= 100; value++) histogram.Record(value);
+            Assert.That(histogram.Count, Is.EqualTo(100));
+            Assert.That(histogram.Percentile(.95), Is.EqualTo(95));
+            Assert.That(histogram.Percentile(.99), Is.EqualTo(99));
+            histogram.Clear();
+            Assert.That(histogram.Count, Is.Zero);
+            Assert.That(histogram.Percentile(.99), Is.Zero);
+        }
+
+        [Test]
+        public void AudioTimingReportsPercentilesAndBufferFormat()
+        {
+            PerformanceTrace.Enabled = true;
+            float[] previous = null;
+            float[] samples = new float[1024];
+            for (int index = 0; index < 20; index++)
+                PerformanceTrace.RecordAudio(
+                    samples, 2, ref previous,
+                    Stopwatch.GetTimestamp() - Stopwatch.Frequency / 10000);
+            PerformanceTrace.TakeAudioTiming(out double p95, out double p99, out double maximum);
+            Assert.That(p95, Is.GreaterThan(0));
+            Assert.That(p99, Is.GreaterThanOrEqualTo(p95));
+            Assert.That(maximum, Is.GreaterThan(0));
+            Assert.That(PerformanceTrace.LastAudioSamples, Is.EqualTo(1024));
+            Assert.That(PerformanceTrace.LastAudioChannels, Is.EqualTo(2));
+        }
     }
 }

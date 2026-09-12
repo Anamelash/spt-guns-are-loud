@@ -86,7 +86,7 @@ namespace GunsAreLoud.Tests
         private LocalGunshotAudioTuning AudioTuning()
         {
             TuningSnapshot t = _config.GetTuning();
-            return new LocalGunshotAudioTuning(0, 0.3f, 99, GunshotLowEndMode.PitchedCopy,
+            return new LocalGunshotAudioTuning(0, 0.3f, 99,
                 AutomaticPitchedRoute.CachedReport, t.PitchedLayerSemitones,
                 t.PitchedLayerHighpassHz, t.PitchedLayerLowpassHz, t.PitchedLayerFadePercent,
                 t.AutomaticPitchedTailSeconds, t.PitchedLayerGainDb, t.PitchedLayerOcclusion,
