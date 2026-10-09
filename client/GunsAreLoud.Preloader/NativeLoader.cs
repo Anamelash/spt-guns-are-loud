@@ -25,8 +25,8 @@ public static class NativeLoader
         {
             string player = Path.Combine(Paths.GameRootPath, "UnityPlayer.dll");
             if (Hash(player) != "BF491512C0122395C4BA0316B936F22CB2D586BBF320C9417904DAC3C07CC9BE") throw new Exception("Unsupported UnityPlayer hash");
-            string dll = Path.Combine(Path.GetDirectoryName(typeof(NativeLoader).Assembly.Location), "AudioPluginGalHeadphones.dll");
-            if (Hash(dll) != "A86909470D269779D6101FA653D5C01EE5D0CB9771ABD642AE3E6C0567B0E30D") throw new Exception("Unsupported DSP hash");
+            string dll = Path.Combine(Path.GetDirectoryName(typeof(NativeLoader).Assembly.Location), "GalHeadphoneElectronics.dll");
+            if (Hash(dll) != "9F744C19F8D0DE853EE363EA3E158ADC793A33A2CEA172CA9A17C33ED0F0D543") throw new Exception("Unsupported DSP hash");
             IntPtr unity = GetModuleHandleW("UnityPlayer.dll");
             if (unity == IntPtr.Zero) throw new Exception("UnityPlayer not loaded");
 
@@ -34,7 +34,7 @@ public static class NativeLoader
             if (registry == IntPtr.Zero) throw new Exception("Unity native plugin registry not initialized");
             long before = Marshal.ReadInt64(registry, 0x10);
             if (before < 0 || before > 1000) throw new Exception("Invalid registry count");
-            IntPtr module = GetModuleHandleW("AudioPluginGalHeadphones.dll");
+            IntPtr module = GetModuleHandleW("GalHeadphoneElectronics.dll");
             if (module != IntPtr.Zero)
             {
                 var loadedPath = new System.Text.StringBuilder(32768);

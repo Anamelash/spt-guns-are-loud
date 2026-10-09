@@ -8,7 +8,7 @@
 
 The mod builds on EFT's original weapon recordings. Active headsets protect your hearing and change how you hear the world: each model has its own isolation, amplification, sound and response to loud events.
 
-**Version:** 1.1.1
+**Version:** 1.1.2
 
 **Supported game:** SPT 4.1.5 on Windows x64
 
@@ -63,9 +63,9 @@ The archive contains three required files:
 
 - `BepInEx/plugins/GunsAreLoud/GunsAreLoud.Client.dll`
 - `BepInEx/patchers/GunsAreLoud/GunsAreLoud.Preloader.dll`
-- `BepInEx/patchers/GunsAreLoud/AudioPluginGalHeadphones.dll`
+- `BepInEx/patchers/GunsAreLoud/GalHeadphoneElectronics.dll`
 
-**Replace all three when updating.** They must come from the same release. Mixing versions leaves headset processing on Vanilla; the reason is recorded in the log.
+**Replace all three when updating.** They must come from the same release. Mixing versions leaves headset processing on Vanilla; the reason is recorded in the log. Releases before 1.1.2 shipped the third file as `AudioPluginGalHeadphones.dll`; that file is no longer used and can be deleted.
 
 Your saved settings are preserved. Older settings are migrated on first launch where needed. The release archive needs no compilation, Unity Editor, separate installer or manual game-file edits.
 

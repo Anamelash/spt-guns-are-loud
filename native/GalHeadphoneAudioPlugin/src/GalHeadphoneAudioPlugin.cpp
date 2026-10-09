@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <new>
 
 namespace {
@@ -17,11 +18,13 @@ std::atomic<int> instanceCount{0};
 std::atomic<unsigned long long> processedFrames{0};
 unsigned generation(float value){return std::isfinite(value)&&value>0?static_cast<unsigned>(value>16777215?16777215:value):0;}
 UNITY_AUDIODSP_RESULT UNITY_AUDIODSP_CALLBACK create(UnityAudioEffectState* s) {
-    auto* d=new(std::nothrow) EffectData(); if(!d) return UNITY_AUDIODSP_ERR_UNSUPPORTED;
+    // malloc + placement new instead of operator new: keeps libstdc++ and winpthreads out of the
+    // statically linked DLL. Their thread-control imports made antivirus heuristics flag the file.
+    auto* d=static_cast<EffectData*>(std::malloc(sizeof(EffectData))); if(!d) return UNITY_AUDIODSP_ERR_UNSUPPORTED; new(d) EffectData();
     for(int i=0;i<ParamCount;++i) d->p[i].store(Defaults[i]);
     d->dsp.reset(static_cast<float>(s->samplerate)); s->effectdata=d; instanceCount.fetch_add(1,std::memory_order_relaxed); return UNITY_AUDIODSP_OK;
 }
-UNITY_AUDIODSP_RESULT UNITY_AUDIODSP_CALLBACK release(UnityAudioEffectState* s){if(s->effectdata){delete static_cast<EffectData*>(s->effectdata);s->effectdata=nullptr;instanceCount.fetch_sub(1,std::memory_order_relaxed);}return UNITY_AUDIODSP_OK;}
+UNITY_AUDIODSP_RESULT UNITY_AUDIODSP_CALLBACK release(UnityAudioEffectState* s){if(s->effectdata){auto*d=static_cast<EffectData*>(s->effectdata);d->~EffectData();std::free(d);s->effectdata=nullptr;instanceCount.fetch_sub(1,std::memory_order_relaxed);}return UNITY_AUDIODSP_OK;}
 UNITY_AUDIODSP_RESULT UNITY_AUDIODSP_CALLBACK reset(UnityAudioEffectState* s){auto*d=static_cast<EffectData*>(s->effectdata);if(d){d->dsp.reset(static_cast<float>(s->samplerate),d->p[QuietGain].load());d->resetGeneration=generation(d->p[ResetGeneration].load());}return UNITY_AUDIODSP_OK;}
 gal::Parameters snapshot(const EffectData& d){
  gal::Parameters p;

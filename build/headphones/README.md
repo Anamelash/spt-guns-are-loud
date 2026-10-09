@@ -45,7 +45,7 @@ The native effect exposes its seven ABI 2 colouring controls as
 `GAL_ElectronicsNoiseDb`, `GAL_ElectronicsSaturation` and
 `GAL_ElectronicsDelayMs`, and its ABI 3 band order as
 `GAL_ElectronicsBandOrder`, all neutral in every snapshot. The Editor must have
-preloaded the current `AudioPluginGalHeadphones.dll` (copy it to
+preloaded the current `GalHeadphoneElectronics.dll` (copy it to
 `Assets/Plugins/x86_64`): the generator refuses an effect definition with
 other than 20 parameters, which an older DLL would give.
 
@@ -85,7 +85,7 @@ required before embedding or installing a candidate bundle.
 
 Unity 2022.3 has no managed runtime API for registering a new native mixer
 effect. `install-native-plugin.ps1` can register the pinned
-`AudioPluginGalHeadphones.dll` in the exact supported isolated installation's
+`GalHeadphoneElectronics.dll` in the exact supported isolated installation's
 serialized `BuildSettings.preloadedPlugins` before the player starts. The current release does not run this installer: its BepInEx preloader registers the native effect in memory instead.
 
 The default is a read-only dry run:

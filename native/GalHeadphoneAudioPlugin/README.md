@@ -38,26 +38,29 @@ whenever the DLL changes.
 
 The build is reproducible byte for byte from any directory:
 
-- Toolchain: WinLibs GCC 16.1.0 with MinGW-w64 14.0.0 (UCRT, POSIX threads),
-  release r4: `winget install BrechtSanders.WinLibs.POSIX.UCRT --version 16.1.0-14.0.0-r4`.
-  The script checks `g++ --version` and refuses any other build; a different
-  GCC produces a different binary.
-- The GCC runtime is linked statically (`-static`), so the DLL needs no
-  redistributable runtime. Its imports of thread, TLS and memory-protection
-  functions come from that runtime (winpthreads, libgcc, the MinGW start-up
-  code), not from the plugin, which makes no Windows API calls of its own.
-- The PE timestamp comes from the `$sourceDateEpoch` constant in `build.ps1`
-  (passed to the linker as `SOURCE_DATE_EPOCH`) rather than from the build
-  time, and the image base is fixed at `0x180000000` rather than derived from
-  the output path. Keep the timestamp non-zero: a zero timestamp makes the DLL
-  trip generic antivirus heuristics. Bump the constant when the DSP sources
-  change.
+- Toolchain: zig 0.17.0, which bundles clang/LLVM, the LLD linker and the
+  mingw-w64 runtime: `winget install zig.zig --version 0.17.0 --scope user`.
+  The script checks `zig version` and refuses any other release; a different
+  zig produces a different binary.
+- The DLL targets `x86_64-windows-gnu` and depends only on `KERNEL32.dll` and
+  the Windows 10 UCRT (`api-ms-win-crt-*`), with no redistributable runtime.
+  It is built with `-fno-exceptions -fno-rtti`, and the plugin allocates its
+  effect state with `malloc` and placement new rather than `operator new`, so
+  no C++ runtime library is linked. The few kernel32 imports (critical
+  sections, `TlsGetValue`, `VirtualProtect`, `VirtualQuery`) belong to the
+  mingw-w64 start-up code; the plugin makes no Windows API calls of its own.
+- `-g0` and `--strip-all` keep debug data, symbols and local paths out of the
+  binary. The PE timestamp is LLD's deterministic content hash, and the image
+  base is fixed at `0x180000000`.
 - `src/version.rc` gives the DLL a version resource. Its file version follows
   the plugin ABI, not the mod release, because the DLL changes only when the
   DSP does.
 - The DLL is linked with the Windows GUI subsystem, and the output must be
-  named `AudioPluginGalHeadphones.dll`: the name is written into the export
-  table.
+  named `GalHeadphoneElectronics.dll`: the name is written into the export
+  table. Earlier releases shipped the file as `AudioPluginGalHeadphones.dll`.
+- zig compiles its bundled runtime on first use and now and then fails to open
+  one of its own files while checking that cache; the script retries each
+  compiler invocation up to three times.
 
 Unity registration uses the documented `UnityGetAudioEffectDefinitions` export.
 The DLL must be available to Unity's native plug-in importer/player before a

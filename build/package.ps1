@@ -23,8 +23,8 @@ if (-not $SkipBuild) {
     & dotnet build $preloaderProject -c $Configuration --nologo
     if ($LASTEXITCODE -ne 0) { throw "Preloader build failed" }
 }
-$native = Join-Path $repoRoot 'native\GalHeadphoneAudioPlugin\artifacts\win-x64\AudioPluginGalHeadphones.dll'
-if (!(Test-Path $native) -or (Get-FileHash $native).Hash -ne 'A86909470D269779D6101FA653D5C01EE5D0CB9771ABD642AE3E6C0567B0E30D') { throw 'Pinned native DSP missing or changed' }
+$native = Join-Path $repoRoot 'native\GalHeadphoneAudioPlugin\artifacts\win-x64\GalHeadphoneElectronics.dll'
+if (!(Test-Path $native) -or (Get-FileHash $native).Hash -ne '9F744C19F8D0DE853EE363EA3E158ADC793A33A2CEA172CA9A17C33ED0F0D543') { throw 'Pinned native DSP missing or changed' }
 
 $dist = Join-Path $repoRoot "dist"
 $stage = [IO.Path]::GetFullPath((Join-Path $dist "stage"))

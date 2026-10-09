@@ -8,11 +8,11 @@ if(NOT DEFINED UNITY_AUDIO_SDK_DIR)
   set(UNITY_AUDIO_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../.deps/NativeAudioPlugins/NativeCode")
 endif()
 
-add_library(AudioPluginGalHeadphones SHARED src/GalHeadphoneAudioPlugin.cpp src/GalHeadphoneDsp.cpp)
-target_include_directories(AudioPluginGalHeadphones PRIVATE src "${UNITY_AUDIO_SDK_DIR}")
-target_compile_definitions(AudioPluginGalHeadphones PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+add_library(GalHeadphoneElectronics SHARED src/GalHeadphoneAudioPlugin.cpp src/GalHeadphoneDsp.cpp)
+target_include_directories(GalHeadphoneElectronics PRIVATE src "${UNITY_AUDIO_SDK_DIR}")
+target_compile_definitions(GalHeadphoneElectronics PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 if(MSVC)
-  target_compile_options(AudioPluginGalHeadphones PRIVATE /W4 /permissive- /EHsc)
+  target_compile_options(GalHeadphoneElectronics PRIVATE /W4 /permissive- /EHsc)
 endif()
 
 add_executable(GalHeadphoneDspTests tests/GalHeadphoneDspTests.cpp src/GalHeadphoneDsp.cpp)
@@ -26,4 +26,4 @@ target_include_directories(GalHeadphoneRegistrationTests PRIVATE "${UNITY_AUDIO_
 
 enable_testing()
 add_test(NAME dsp COMMAND GalHeadphoneDspTests)
-add_test(NAME registration COMMAND GalHeadphoneRegistrationTests $<TARGET_FILE:AudioPluginGalHeadphones>)
+add_test(NAME registration COMMAND GalHeadphoneRegistrationTests $<TARGET_FILE:GalHeadphoneElectronics>)

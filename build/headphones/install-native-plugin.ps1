@@ -9,17 +9,17 @@ $ErrorActionPreference = 'Stop'
 $supportedGame = 'D:\Games\SPT_4.1.3'
 $baselineGlobalHash = 'E75E77D831BCCCD96981896147F53F572EF78B4AC22FCE1FCBB8DC93AF3079F9'
 # Pinned only after the DLL passed actual Unity 2022.3 Editor registration.
-$pluginHash = 'A86909470D269779D6101FA653D5C01EE5D0CB9771ABD642AE3E6C0567B0E30D'
-$pluginName = 'AudioPluginGalHeadphones'
+$pluginHash = '9F744C19F8D0DE853EE363EA3E158ADC793A33A2CEA172CA9A17C33ED0F0D543'
+$pluginName = 'GalHeadphoneElectronics'
 $scriptRoot = Split-Path -Parent $PSCommandPath
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $scriptRoot '..\..'))
 $globalPath = Join-Path $supportedGame 'EscapeFromTarkov_Data\globalgamemanagers'
-$pluginSource = Join-Path $repoRoot 'native\GalHeadphoneAudioPlugin\artifacts\win-x64\AudioPluginGalHeadphones.dll'
-$pluginTarget = Join-Path $supportedGame 'EscapeFromTarkov_Data\Plugins\x86_64\AudioPluginGalHeadphones.dll'
+$pluginSource = Join-Path $repoRoot 'native\GalHeadphoneAudioPlugin\artifacts\win-x64\GalHeadphoneElectronics.dll'
+$pluginTarget = Join-Path $supportedGame 'EscapeFromTarkov_Data\Plugins\x86_64\GalHeadphoneElectronics.dll'
 $configPath = Join-Path $supportedGame 'BepInEx\config\com.anamelash.gunsareloud.cfg'
 $backupDir = Join-Path $supportedGame 'BepInEx\GunsAreLoud.NativePluginBackup'
 $globalBackup = Join-Path $backupDir 'globalgamemanagers.original'
-$dllBackup = Join-Path $backupDir 'AudioPluginGalHeadphones.original.dll'
+$dllBackup = Join-Path $backupDir 'GalHeadphoneElectronics.original.dll'
 $manifestPath = Join-Path $backupDir 'manifest.json'
 $patcher = Join-Path $scriptRoot 'native_plugin_registration.py'
 
@@ -60,7 +60,7 @@ if ($Restore) {
     Copy-Item -LiteralPath $globalBackup -Destination $restoreTemp
     [IO.File]::Replace($restoreTemp, $globalPath, [NullString]::Value)
     if ($manifest.originalPluginPresent) {
-        $dllTemp = Join-Path (Split-Path -Parent $pluginTarget) ('.AudioPluginGalHeadphones.restore-' + [Guid]::NewGuid().ToString('N') + '.dll')
+        $dllTemp = Join-Path (Split-Path -Parent $pluginTarget) ('.GalHeadphoneElectronics.restore-' + [Guid]::NewGuid().ToString('N') + '.dll')
         Copy-Item -LiteralPath $dllBackup -Destination $dllTemp
         [IO.File]::Replace($dllTemp, $pluginTarget, [NullString]::Value)
     } else {
@@ -118,7 +118,7 @@ try {
     }
     $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding utf8
     try {
-        $dllInstallTemp = Join-Path (Split-Path -Parent $pluginTarget) ('.AudioPluginGalHeadphones.install-' + [Guid]::NewGuid().ToString('N') + '.dll')
+        $dllInstallTemp = Join-Path (Split-Path -Parent $pluginTarget) ('.GalHeadphoneElectronics.install-' + [Guid]::NewGuid().ToString('N') + '.dll')
         Copy-Item -LiteralPath $pluginSource -Destination $dllInstallTemp
         Move-Item -LiteralPath $dllInstallTemp -Destination $pluginTarget
         Assert-GameClosed

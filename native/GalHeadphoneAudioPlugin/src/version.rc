@@ -19,9 +19,9 @@ BEGIN
       VALUE "CompanyName", "Anamelash"
       VALUE "FileDescription", "Guns Are Loud headset electronics DSP (Unity native audio effect)"
       VALUE "FileVersion", "3.0.0.0"
-      VALUE "InternalName", "AudioPluginGalHeadphones"
+      VALUE "InternalName", "GalHeadphoneElectronics"
       VALUE "LegalCopyright", "MIT License"
-      VALUE "OriginalFilename", "AudioPluginGalHeadphones.dll"
+      VALUE "OriginalFilename", "GalHeadphoneElectronics.dll"
       VALUE "ProductName", "Guns Are Loud"
       VALUE "ProductVersion", "ABI 3"
     END

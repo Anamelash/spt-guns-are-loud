@@ -5,7 +5,7 @@ namespace GunsAreLoud.Client.Audio
 {
     internal static class HeadphoneNativePlugin
     {
-        private const string ModuleName = "AudioPluginGalHeadphones.dll";
+        private const string ModuleName = "GalHeadphoneElectronics.dll";
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate int ReadInt();
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]

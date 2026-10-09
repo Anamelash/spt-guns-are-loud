@@ -1,9 +1,9 @@
 # Changes from vanilla
 
-## 1.1.1 - antivirus false positive
+## 1.1.2 - antivirus false positive
 
-- Nothing changes in the sound. The headset electronics file in 1.1.0 was flagged as a trojan by BitDefender and by the scanners built on its engine (Emsisoft, GData, eScan, VIPRE, ALYac, Arcabit), and Nexus Mods quarantined the archive on that verdict. The file is a Unity audio effect, and the detection was a generic heuristic reacting to the way the file was built rather than to anything it does. 1.1.1 ships it built differently, and that build no longer trips the heuristic.
-- All three files in the archive change in this version. Replace all of them: a mixed installation keeps the headset on Vanilla.
+- Nothing changes in the sound. The headset electronics file in 1.1.0 was flagged as a trojan by BitDefender and by the scanners built on its engine (Emsisoft, GData, eScan, VIPRE, ALYac, Arcabit), and Nexus Mods quarantined the archive on that verdict. The file is a Unity audio effect, and the detection keyed on the file's name rather than on anything it does: the same code under another name scans clean, and an empty file under the old name is flagged. The file is now `GalHeadphoneElectronics.dll`.
+- All three files in the archive change in this version. Replace all of them: a mixed installation keeps the headset on Vanilla. The old `AudioPluginGalHeadphones.dll` is no longer used and can be deleted.
 
 ## 1.1.0 - headset electronics and grenades
 
