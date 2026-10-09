@@ -27,6 +27,21 @@ namespace GunsAreLoud.Tests
         }
 
         [Test]
+        public void OnlyTheAbiOfTheEmbeddedMixerIsAccepted()
+        {
+            Assert.That(HeadphoneNativePlugin.AcceptsAbi(true, 3, out string reason), Is.True);
+            Assert.That(reason, Is.Empty);
+            Assert.That(HeadphoneNativePlugin.AcceptsAbi(true, 1, out reason), Is.False);
+            Assert.That(reason, Is.EqualTo("native DSP ABI 1 is older than the mixer asset"));
+            Assert.That(HeadphoneNativePlugin.AcceptsAbi(true, 2, out reason), Is.False);
+            Assert.That(reason, Is.EqualTo("native DSP ABI 2 is older than the mixer asset"));
+            Assert.That(HeadphoneNativePlugin.AcceptsAbi(true, 4, out reason), Is.False);
+            Assert.That(reason, Does.Contain("newer"));
+            Assert.That(HeadphoneNativePlugin.AcceptsAbi(false, 2, out reason), Is.False);
+            Assert.That(reason, Does.Contain("not preloaded"));
+        }
+
+        [Test]
         public void HistoricalNonzeroCounterDoesNotProveCurrentProcessing()
         {
             var activity = new HeadphoneFrameActivity();

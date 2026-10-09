@@ -36,6 +36,24 @@ namespace GunsAreLoud.Client.Runtime
         internal const string PassiveLowFrequency = "GAL_PassiveBand1Frequency";
         internal const string PassiveMidFrequency = "GAL_PassiveBand4Frequency";
         internal const string PassiveHighFrequency = "GAL_PassiveBand7Frequency";
+        internal const string ElectronicsReset = "GAL_ElectronicsReset";
+        internal const string ElectronicsDelay = "GAL_ElectronicsDelayMs";
+        // Native ABI 3: microphone band edge order, 1 (first order) at rest.
+        internal const string ElectronicsBandOrder = "GAL_ElectronicsBandOrder";
+        internal const float NeutralBandOrder = 1f;
+
+        // Native ABI 2 character controls and the value at which each one's
+        // DSP stage is left out. The mixer asset must carry exactly these.
+        internal static readonly (string Name, float Neutral)[] CharacterParameters =
+        {
+            ("GAL_ElectronicsLowShelfDb", 0f),
+            ("GAL_ElectronicsLowShelfHz", HeadsetElectronicsCharacter.NeutralLowShelfHz),
+            ("GAL_ElectronicsPresenceDb", 0f),
+            ("GAL_ElectronicsPresenceHz", HeadsetElectronicsCharacter.NeutralPresenceHz),
+            ("GAL_ElectronicsNoiseDb", HeadsetElectronicsCharacter.NoiseOffDbFs),
+            ("GAL_ElectronicsSaturation", 0f),
+            (ElectronicsDelay, 0f)
+        };
 
         private static readonly string[] Required =
         {
@@ -57,7 +75,10 @@ namespace GunsAreLoud.Client.Runtime
             "GAL_ElectronicsMicHP", "GAL_ElectronicsMicLP", "GAL_ElectronicsQuietGain",
             "GAL_ElectronicsThreshold", "GAL_ElectronicsRatio", "GAL_ElectronicsKnee",
             "GAL_ElectronicsAttack", "GAL_ElectronicsHold", "GAL_ElectronicsRelease",
-            "GAL_ElectronicsCeiling", "GAL_ElectronicsWet", "GAL_ElectronicsReset",
+            "GAL_ElectronicsCeiling", "GAL_ElectronicsWet", ElectronicsReset,
+            "GAL_ElectronicsLowShelfDb", "GAL_ElectronicsLowShelfHz", "GAL_ElectronicsPresenceDb",
+            "GAL_ElectronicsPresenceHz", "GAL_ElectronicsNoiseDb", "GAL_ElectronicsSaturation",
+            ElectronicsDelay, ElectronicsBandOrder,
             // EFT's own *CompressorSendLevel parameters are neither read nor written.
             // The electronics sends come from the worn headset template, and a
             // restore must never write a stale snapshot over EFT's current sends.
@@ -99,8 +120,14 @@ namespace GunsAreLoud.Client.Runtime
             { reason = "mixer-restore-pending"; return false; }
             if (!TrySnapshot(out reason)) return false;
 
-            int nextReset = _resetGeneration == 16777215 ? 1 : _resetGeneration + 1;
-            var values = BuildValues(profile, fit, nextReset, sends);
+            // A new device restarts the native detector, filters and delay line.
+            // The same device with only its colouring moved (the Hear-through
+            // Character control) keeps them: a restart there would be heard as
+            // a jump in gain on every step of the slider.
+            var values = BuildValues(profile, fit, _resetGeneration, sends);
+            if (!OnlyColouringChanged(values))
+                values[ElectronicsReset] = _resetGeneration == 16777215 ? 1 : _resetGeneration + 1;
+            int nextReset = (int)values[ElectronicsReset];
             foreach (KeyValuePair<string, float> item in values)
             {
                 if (!_mixer.TrySet(item.Key, item.Value))
@@ -128,14 +155,30 @@ namespace GunsAreLoud.Client.Runtime
         {
             if (!_active || _restorePending || _expected == null)
             { reason = "route not active"; return false; }
-            foreach (var item in _expected)
-            {
-                if (!_mixer.TryGet(item.Key, out float actual) || float.IsNaN(actual) || float.IsInfinity(actual) ||
-                    Math.Abs(actual - item.Value) > Math.Max(0.001f, Math.Abs(item.Value) * 0.0001f))
-                { reason = "mixer readback mismatch: " + item.Key; return false; }
-            }
+            if (TryFindDrift(out string name, out _, out _))
+            { reason = "mixer readback mismatch: " + name; return false; }
             reason = "all profile and routing parameters verified";
             return true;
+        }
+
+        /// <summary>
+        /// The first owned parameter whose live value is no longer the one this
+        /// route wrote, with both values. Something outside the route changed it.
+        /// </summary>
+        internal bool TryFindDrift(out string name, out float expected, out float actual)
+        {
+            name = null; expected = actual = 0f;
+            if (!_active || _restorePending || _expected == null) return false;
+            foreach (var item in _expected)
+            {
+                bool readable = _mixer.TryGet(item.Key, out float value);
+                if (readable && !float.IsNaN(value) && !float.IsInfinity(value) &&
+                    Math.Abs(value - item.Value) <= Math.Max(0.001f, Math.Abs(item.Value) * 0.0001f))
+                    continue;
+                name = item.Key; expected = item.Value; actual = readable ? value : float.NaN;
+                return true;
+            }
+            return false;
         }
 
         /// <summary>
@@ -156,6 +199,26 @@ namespace GunsAreLoud.Client.Runtime
                 else text.Append('?');
             }
             return text.ToString();
+        }
+
+        private bool OnlyColouringChanged(Dictionary<string, float> values)
+        {
+            if (!_active || _restorePending || _expected == null || _resetGeneration == 0) return false;
+            foreach (KeyValuePair<string, float> item in values)
+            {
+                if (IsColouring(item.Key)) continue;
+                if (!_expected.TryGetValue(item.Key, out float previous) || previous != item.Value) return false;
+            }
+            return true;
+        }
+
+        // Delay is excluded: a new delay line length is applied with a restart.
+        private static bool IsColouring(string name)
+        {
+            if (name == ElectronicsDelay) return false;
+            foreach (var parameter in CharacterParameters)
+                if (parameter.Name == name) return true;
+            return false;
         }
 
         private bool TrySnapshot(out string reason)
@@ -238,7 +301,15 @@ namespace GunsAreLoud.Client.Runtime
                 ["GAL_ElectronicsRelease"] = electronics.ReleaseSeconds * 1000f,
                 ["GAL_ElectronicsCeiling"] = electronics.OutputCeiling,
                 ["GAL_ElectronicsWet"] = 1f,
-                ["GAL_ElectronicsReset"] = resetGeneration
+                ["GAL_ElectronicsLowShelfDb"] = electronics.LowShelfDb,
+                ["GAL_ElectronicsLowShelfHz"] = electronics.LowShelfHz,
+                ["GAL_ElectronicsPresenceDb"] = electronics.PresenceDb,
+                ["GAL_ElectronicsPresenceHz"] = electronics.PresenceHz,
+                ["GAL_ElectronicsNoiseDb"] = electronics.NoiseDbFs,
+                ["GAL_ElectronicsSaturation"] = electronics.Saturation,
+                [ElectronicsDelay] = electronics.DelaySeconds * 1000f,
+                [ElectronicsBandOrder] = electronics.MicFilterOrder,
+                [ElectronicsReset] = resetGeneration
             };
             for (int band = 1; band <= 9; band++)
             {

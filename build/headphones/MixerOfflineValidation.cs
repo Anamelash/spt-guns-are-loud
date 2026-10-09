@@ -44,6 +44,22 @@ public static class MixerOfflineValidation
         public float contrastNeutralMaxError, contrastNeutralRmsError;
         public float contrastScaledMaxError, contrastScaledRmsError;
         public bool contrastEquivalent;
+        // DSP ABI 2 character controls.
+        public string previousMixer;
+        public float electronicsNeutralMaxError, electronicsNeutralRmsError;
+        public bool electronicsNeutralDefaults;
+        public float electronicsDownstreamGainDb, electronicsNoiseIdleDb, electronicsNoiseExpectedDb;
+        public float electronicsSignalReductionDb, electronicsNoiseUnderSignalDropDb;
+        public bool electronicsNoiseLevel;
+        public float[] electronicsVoicingFrequencies, electronicsVoicingDeltaDb, electronicsVoicingExpectedDb;
+        public float electronicsVoicingMaxErrorDb;
+        public bool electronicsVoicing;
+        public float[] electronicsSaturationInputDb, electronicsSaturationPeak;
+        public float electronicsSaturationCeiling;
+        public bool electronicsSaturation;
+        public float[] electronicsBandFrequencies, electronicsBandDeltaDb, electronicsBandExpectedDb;
+        public float electronicsBandMaxErrorDb;
+        public bool electronicsBandOrder;
     }
     [Serializable] private sealed class FitSettings { public string profileId; public float baseVolumeDb; public FitBand[] bands; }
     [Serializable] private sealed class FitBand { public float frequencyHz, linearGain, octaveRange, targetAttenuationDb; }
@@ -86,6 +102,7 @@ public static class MixerOfflineValidation
         string output = Environment.GetEnvironmentVariable("GAL_VALIDATION_OUTPUT") ?? "mixer-offline-validation.json";
 
         AudioMixer baseline = Load(baselinePath), candidate = Load(candidatePath);
+        AssetBundle candidateBundle = Bundles[Bundles.Count - 1];
         ApplyCommonState(baseline); ApplyCommonState(candidate);
         await NextFrame(); // Native snapshot transitions are committed by the player loop.
         var restoration = new System.Collections.Generic.Dictionary<string, float>();
@@ -211,12 +228,30 @@ public static class MixerOfflineValidation
             report.electronicsCoverage &= rms > 0.00005;
         }
 
+        await ValidateCharacter(candidate, report);
+        ApplyParameterFile(candidate, Environment.GetEnvironmentVariable("GAL_ELECTRONICS_JSON"));
+
         foreach (var parameter in restoration)
             if (!candidate.SetFloat(parameter.Key, parameter.Value)) throw new Exception("Restore failed: " + parameter.Key);
         float[] restoredReference = await Render(baseline, vanillaGroup, TestSignal());
         float[] restoredCandidate = await Render(candidate, vanillaGroup, TestSignal());
         Compare(restoredReference, restoredCandidate, out report.restoreMaxError, out report.restoreRmsError);
         report.vanillaRestored = report.restoreMaxError <= 0.00001f && report.restoreRmsError <= 0.000001f;
+
+        // Last, because the previous bundle shares the candidate's bundle name
+        // and can only be loaded once the candidate is unloaded.
+        report.previousMixer = Required("GAL_PREVIOUS_MIXER");
+        float[] currentRealistic = await RenderRealistic(candidate, fit, false);
+        candidateBundle.Unload(true);
+        Bundles.Remove(candidateBundle);
+        AudioMixer previous = Load(report.previousMixer);
+        ApplyCommonState(previous);
+        await NextFrame();
+        float[] previousRealistic = await RenderRealistic(previous, fit, true);
+        EnsureAudible(currentRealistic, "current Realistic route");
+        Compare(previousRealistic, currentRealistic, out report.electronicsNeutralMaxError, out report.electronicsNeutralRmsError);
+        // -90 dBFS: the new controls at their defaults leave the Realistic sound as it was.
+        report.electronicsNeutralDefaults = report.electronicsNeutralMaxError <= 0.0000316f;
 
         File.WriteAllText(output, JsonUtility.ToJson(report, true));
         if (!report.vanillaIdentity) throw new Exception("Candidate Vanilla route differs from cloned baseline; see " + output);
@@ -225,7 +260,264 @@ public static class MixerOfflineValidation
         if (!report.electronicsLinked) throw new Exception("Electronics branch did not show shared stereo gain reduction; see " + output);
         if (!report.vanillaRestored) throw new Exception("Returning to Vanilla changed the stock route; see " + output);
         if (!report.electronicsCoverage) throw new Exception("A world category does not reach the shared electronics bus; see " + output);
+        if (!report.electronicsNeutralDefaults) throw new Exception("Default character controls changed the Realistic route; see " + output);
+        if (!report.electronicsNoiseLevel) throw new Exception("Electronics self-noise is off its requested level; see " + output);
+        if (!report.electronicsVoicing) throw new Exception("Electronics voicing differs from its design; see " + output);
+        if (!report.electronicsSaturation) throw new Exception("Electronics saturation is not monotonic under the ceiling; see " + output);
+        if (!report.electronicsBandOrder) throw new Exception("Electronics band order 2 differs from its design; see " + output);
         Debug.Log("GAL_MIXER_OFFLINE_VALIDATION_COMPLETE " + output);
+    }
+
+    private static readonly string[] CharacterParameters = {
+        "GAL_ElectronicsLowShelfDb", "GAL_ElectronicsLowShelfHz", "GAL_ElectronicsPresenceDb",
+        "GAL_ElectronicsPresenceHz", "GAL_ElectronicsNoiseDb", "GAL_ElectronicsSaturation",
+        "GAL_ElectronicsDelayMs", "GAL_ElectronicsBandOrder" };
+
+    // Realistic route as the client writes it: fitted passive bus plus the
+    // shared electronics, both audible. A fresh reset generation makes the
+    // native state identical in both bundles before the render.
+    private static async Task<float[]> RenderRealistic(AudioMixer mixer, FitSettings fit, bool previousAbi)
+    {
+        ApplyFit(mixer, fit);
+        ApplyParameterFile(mixer, Environment.GetEnvironmentVariable("GAL_ELECTRONICS_JSON"), previousAbi);
+        Set(mixer, "GAL_PassiveVolume", fit.baseVolumeDb);
+        Set(mixer, "GAL_ElectronicsReset", 7f);
+        return await Render(mixer, "Guns/Gunshots", DynamicsSignal(),
+            "Main/Environment/CommonSounds", Tone(1000, 0, 0.015f, 0.75f));
+    }
+
+    private static async Task ValidateCharacter(AudioMixer mixer, Report report)
+    {
+        string electronics = Environment.GetEnvironmentVariable("GAL_ELECTRONICS_JSON");
+        const string route = "Guns/Gunshots";
+        int onset = Rate;
+
+        // The stock World, InGame and Master effects (SFX reverb, reflections,
+        // a master compressor) sit between the electronics bus and the
+        // listener, and treat a tone, a clipped wave and broadband noise
+        // differently. Calibrate the bus with white noise of known level that
+        // reaches it unchanged: the NonspatialBypass send is the first effect
+        // of its group, and Wet 0 is the processor's exact bypass. Its dry
+        // path runs through the passive bus, held at -80 dB here.
+        ApplyParameterFile(mixer, electronics);
+        mixer.GetFloat("GAL_ElectronicsQuietGain", out float quietGain);
+        Set(mixer, "GAL_ElectronicsEffectsReturnsSend", -80f);
+        Set(mixer, "GAL_ElectronicsWet", 0f);
+        const float referenceRms = 0.01f;
+        float[] reference = await Render(mixer, "NonspatialBypass", WhiteNoise(referenceRms, 1.5f));
+        double downstream = ChannelRms(reference, onset + Rate / 5, onset + Rate * 9 / 10, 0) / referenceRms;
+        report.electronicsDownstreamGainDb = (float)Db(downstream);
+
+        // Self-noise with no input: requested level plus quiet gain at the bus.
+        ApplyParameterFile(mixer, electronics);
+        Set(mixer, "GAL_ElectronicsEffectsReturnsSend", -80f);
+        Set(mixer, "GAL_ElectronicsNoiseDb", -60f);
+        float[] idle = await Render(mixer, route, new float[Rate * 3 / 2 * 2],
+            beforeDrain: () => Set(mixer, "GAL_ElectronicsNoiseDb", -120f));
+        report.electronicsNoiseIdleDb = (float)(Db(ChannelRms(idle, onset + Rate / 5, onset + Rate * 9 / 10, 0)) - report.electronicsDownstreamGainDb);
+        report.electronicsNoiseExpectedDb = -60f + quietGain;
+
+        // Under a loud left-only input the linked detector turns the right
+        // channel down too; its noise must drop by the gain reduction the
+        // tone itself receives.
+        float leftQuiet = (float)Db(await ChannelToneRms(mixer, route, 0.01f, 0, -120f));
+        float leftLoud = (float)Db(await ChannelToneRms(mixer, route, 0.316f, 0, -120f));
+        report.electronicsSignalReductionDb = (leftQuiet + 30f) - leftLoud;
+        double rightNoisy = await ChannelToneRms(mixer, route, 0.316f, 1, -60f);
+        double rightClean = await ChannelToneRms(mixer, route, 0.316f, 1, -120f);
+        double noiseUnderSignal = Math.Sqrt(Math.Max(1e-20, rightNoisy * rightNoisy - rightClean * rightClean));
+        double noiseIdleAtListener = Math.Pow(10, (report.electronicsNoiseIdleDb + report.electronicsDownstreamGainDb) / 20);
+        report.electronicsNoiseUnderSignalDropDb = (float)(Db(noiseIdleAtListener) - Db(noiseUnderSignal));
+        // The downstream bound only rejects a broken reference render.
+        report.electronicsNoiseLevel = Math.Abs(report.electronicsDownstreamGainDb) <= 12f &&
+            Math.Abs(report.electronicsNoiseIdleDb - report.electronicsNoiseExpectedDb) <= 1f &&
+            report.electronicsSignalReductionDb > 6f &&
+            Math.Abs(report.electronicsNoiseUnderSignalDropDb - report.electronicsSignalReductionDb) <= 1.5f;
+        Debug.Log("GAL_CHARACTER_NOISE downstream=" + report.electronicsDownstreamGainDb + " idle=" + report.electronicsNoiseIdleDb +
+            " expected=" + report.electronicsNoiseExpectedDb + " reduction=" + report.electronicsSignalReductionDb +
+            " drop=" + report.electronicsNoiseUnderSignalDropDb);
+
+        // Voicing sweep at a level far below the detector threshold.
+        const float presenceDb = 6f, presenceHz = 3200f, shelfDb = -6f, shelfHz = 200f;
+        float[] frequencies = { 100, 200, 400, 1000, 2000, 3200, 5000, 10000 };
+        report.electronicsVoicingFrequencies = frequencies;
+        report.electronicsVoicingDeltaDb = new float[frequencies.Length];
+        report.electronicsVoicingExpectedDb = new float[frequencies.Length];
+        ApplyParameterFile(mixer, electronics);
+        var flat = new double[frequencies.Length];
+        for (int i = 0; i < frequencies.Length; i++) flat[i] = await RouteRms(mixer, route, frequencies[i]);
+        Set(mixer, "GAL_ElectronicsPresenceDb", presenceDb); Set(mixer, "GAL_ElectronicsPresenceHz", presenceHz);
+        Set(mixer, "GAL_ElectronicsLowShelfDb", shelfDb); Set(mixer, "GAL_ElectronicsLowShelfHz", shelfHz);
+        for (int i = 0; i < frequencies.Length; i++)
+        {
+            double voiced = await RouteRms(mixer, route, frequencies[i]);
+            report.electronicsVoicingDeltaDb[i] = (float)(Db(voiced) - Db(flat[i]));
+            report.electronicsVoicingExpectedDb[i] = (float)(ShelfDb(frequencies[i], shelfHz, shelfDb) +
+                PeakDb(frequencies[i], presenceHz, presenceDb, 1.2));
+            report.electronicsVoicingMaxErrorDb = Math.Max(report.electronicsVoicingMaxErrorDb,
+                Math.Abs(report.electronicsVoicingDeltaDb[i] - report.electronicsVoicingExpectedDb[i]));
+            Debug.Log("GAL_CHARACTER_VOICING f=" + frequencies[i] + " delta=" + report.electronicsVoicingDeltaDb[i] +
+                " expected=" + report.electronicsVoicingExpectedDb[i]);
+        }
+        report.electronicsVoicing = report.electronicsVoicingMaxErrorDb <= 0.5f;
+
+        // Band order 2 against the first-order edges at the same corners.
+        const float bandHigh = 300f, bandLow = 7000f;
+        float[] bandFrequencies = { 100, 300, 1000, 7000, 12000 };
+        report.electronicsBandFrequencies = bandFrequencies;
+        report.electronicsBandDeltaDb = new float[bandFrequencies.Length];
+        report.electronicsBandExpectedDb = new float[bandFrequencies.Length];
+        var firstOrder = new double[bandFrequencies.Length];
+        ApplyParameterFile(mixer, electronics);
+        Set(mixer, "GAL_ElectronicsMicHP", bandHigh); Set(mixer, "GAL_ElectronicsMicLP", bandLow);
+        for (int i = 0; i < bandFrequencies.Length; i++) firstOrder[i] = await RouteRms(mixer, route, bandFrequencies[i]);
+        Set(mixer, "GAL_ElectronicsBandOrder", 2f);
+        Set(mixer, "GAL_ElectronicsReset", 9f);
+        for (int i = 0; i < bandFrequencies.Length; i++)
+        {
+            double steep = await RouteRms(mixer, route, bandFrequencies[i]);
+            report.electronicsBandDeltaDb[i] = (float)(Db(steep) - Db(firstOrder[i]));
+            report.electronicsBandExpectedDb[i] = (float)(SteepEdgesDb(bandFrequencies[i], bandHigh, bandLow) -
+                OnePoleEdgesDb(bandFrequencies[i], bandHigh, bandLow));
+            report.electronicsBandMaxErrorDb = Math.Max(report.electronicsBandMaxErrorDb,
+                Math.Abs(report.electronicsBandDeltaDb[i] - report.electronicsBandExpectedDb[i]));
+            Debug.Log("GAL_CHARACTER_BAND f=" + bandFrequencies[i] + " delta=" + report.electronicsBandDeltaDb[i] +
+                " expected=" + report.electronicsBandExpectedDb[i]);
+        }
+        report.electronicsBandOrder = report.electronicsBandMaxErrorDb <= 0.5f;
+
+        // Output stage: stepped input levels, compression off. The same input
+        // hard-clamped at the same ceiling marks where the ceiling lands at
+        // the listener after the stock effects; soft saturation must stay under it.
+        const float ceiling = 0.5f;
+        float[] levels = { -36, -30, -24, -18, -12, -6, -3, 0 };
+        int step = Rate * 3 / 20;
+        var steps = new float[levels.Length * step * 2];
+        for (int s = 0; s < levels.Length; s++)
+        {
+            float amplitude = (float)Math.Pow(10, levels[s] / 20);
+            for (int frame = 0; frame < step; frame++)
+            {
+                float wave = amplitude * (float)Math.Sin(2 * Math.PI * 1000 * frame / Rate);
+                steps[(s * step + frame) * 2] = steps[(s * step + frame) * 2 + 1] = wave;
+            }
+        }
+        float[] clamped = await RenderOutputStage(mixer, route, steps, ceiling, 0f);
+        float[] saturated = await RenderOutputStage(mixer, route, steps, ceiling, 0.6f);
+        report.electronicsSaturationInputDb = levels;
+        report.electronicsSaturationPeak = new float[levels.Length];
+        for (int s = 0; s < levels.Length; s++)
+            report.electronicsSaturationCeiling = Math.Max(report.electronicsSaturationCeiling,
+                (float)ChannelPeak(clamped, onset + s * step + Rate / 50, onset + (s + 1) * step, 0));
+        bool monotonic = true, bounded = true;
+        for (int s = 0; s < levels.Length; s++)
+        {
+            int start = onset + s * step + Rate / 50;
+            report.electronicsSaturationPeak[s] = (float)ChannelPeak(saturated, start, onset + (s + 1) * step, 0);
+            if (s > 0) monotonic &= report.electronicsSaturationPeak[s] >= report.electronicsSaturationPeak[s - 1];
+            bounded &= report.electronicsSaturationPeak[s] <= report.electronicsSaturationCeiling * 1.01f;
+        }
+        report.electronicsSaturation = monotonic && bounded &&
+            report.electronicsSaturationPeak[levels.Length - 1] > report.electronicsSaturationPeak[0];
+        Debug.Log("GAL_CHARACTER_SATURATION peaks=" + string.Join(",", report.electronicsSaturationPeak) +
+            " ceiling=" + report.electronicsSaturationCeiling);
+    }
+
+    private static async Task<float[]> RenderOutputStage(AudioMixer mixer, string route, float[] signal,
+        float ceiling, float saturation)
+    {
+        ApplyParameterFile(mixer, Environment.GetEnvironmentVariable("GAL_ELECTRONICS_JSON"));
+        Set(mixer, "GAL_ElectronicsEffectsReturnsSend", -80f);
+        Set(mixer, "GAL_ElectronicsQuietGain", 18f); Set(mixer, "GAL_ElectronicsRatio", 1f);
+        Set(mixer, "GAL_ElectronicsThreshold", 0f); Set(mixer, "GAL_ElectronicsKnee", 0f);
+        Set(mixer, "GAL_ElectronicsCeiling", ceiling); Set(mixer, "GAL_ElectronicsSaturation", saturation);
+        return await Render(mixer, route, signal);
+    }
+
+    // Uniform white noise, independent channels, fixed seeds.
+    private static float[] WhiteNoise(float rms, float seconds)
+    {
+        int frames = (int)(Rate * seconds);
+        var data = new float[frames * 2];
+        uint left = 0x2545F491u, right = 0x6C8E9CF5u;
+        float scale = rms * 1.7320508f / 2147483648f;
+        for (int frame = 0; frame < frames; frame++)
+        {
+            left ^= left << 13; left ^= left >> 17; left ^= left << 5;
+            right ^= right << 13; right ^= right >> 17; right ^= right << 5;
+            data[frame * 2] = unchecked((int)left) * scale;
+            data[frame * 2 + 1] = unchecked((int)right) * scale;
+        }
+        return data;
+    }
+
+    private static async Task<double> ChannelToneRms(AudioMixer mixer, string route, float leftAmplitude,
+        int channel, float noiseDb)
+    {
+        ApplyParameterFile(mixer, Environment.GetEnvironmentVariable("GAL_ELECTRONICS_JSON"));
+        Set(mixer, "GAL_ElectronicsEffectsReturnsSend", -80f);
+        Set(mixer, "GAL_ElectronicsNoiseDb", noiseDb);
+        float[] output = await Render(mixer, route, Tone(1000, leftAmplitude, 0, 0.8f),
+            beforeDrain: () => Set(mixer, "GAL_ElectronicsNoiseDb", -120f));
+        return ChannelRms(output, Rate + Rate / 5, Rate + Rate * 7 / 10, channel);
+    }
+
+    // Magnitudes of the RBJ sections the native DSP uses, at the harness rate.
+    private static double ShelfDb(double f, double f0, double gainDb)
+    {
+        double a = Math.Pow(10, gainDb / 40), w0 = 2 * Math.PI * f0 / Rate, c = Math.Cos(w0);
+        double sq = 2 * Math.Sqrt(a) * (Math.Sin(w0) / 2 * Math.Sqrt(2.0));
+        return BiquadDb(f, a * ((a + 1) - (a - 1) * c + sq), 2 * a * ((a - 1) - (a + 1) * c),
+            a * ((a + 1) - (a - 1) * c - sq), (a + 1) + (a - 1) * c + sq, -2 * ((a - 1) + (a + 1) * c),
+            (a + 1) + (a - 1) * c - sq);
+    }
+
+    private static double PeakDb(double f, double f0, double gainDb, double q)
+    {
+        double a = Math.Pow(10, gainDb / 40), w0 = 2 * Math.PI * f0 / Rate, alpha = Math.Sin(w0) / (2 * q);
+        double c = Math.Cos(w0);
+        return BiquadDb(f, 1 + alpha * a, -2 * c, 1 - alpha * a, 1 + alpha / a, -2 * c, 1 - alpha / a);
+    }
+
+    // The DSP's one-pole microphone edges (band order 1).
+    private static double OnePoleEdgesDb(double f, double highpassHz, double lowpassHz)
+    {
+        double p = Math.Exp(-2 * Math.PI * highpassHz / Rate), q = Math.Exp(-2 * Math.PI * lowpassHz / Rate);
+        return BiquadDb(f, p, -p, 0, 1, -p, 0) + BiquadDb(f, 1 - q, 0, 0, 1, -q, 0);
+    }
+
+    // RBJ Butterworth pair (band order 2).
+    private static double SteepEdgesDb(double f, double highpassHz, double lowpassHz)
+    {
+        double Edge(bool high, double f0)
+        {
+            double w0 = 2 * Math.PI * f0 / Rate, c = Math.Cos(w0), alpha = Math.Sin(w0) / (2 * 0.70710678118654752);
+            double edge = high ? (1 + c) / 2 : (1 - c) / 2;
+            return BiquadDb(f, edge, high ? -2 * edge : 2 * edge, edge, 1 + alpha, -2 * c, 1 - alpha);
+        }
+        return Edge(true, highpassHz) + Edge(false, lowpassHz);
+    }
+
+    private static double BiquadDb(double f, double b0, double b1, double b2, double a0, double a1, double a2)
+    {
+        double w = 2 * Math.PI * f / Rate, c1 = Math.Cos(w), s1 = Math.Sin(w), c2 = Math.Cos(2 * w), s2 = Math.Sin(2 * w);
+        double nr = b0 + b1 * c1 + b2 * c2, ni = -(b1 * s1 + b2 * s2);
+        double dr = a0 + a1 * c1 + a2 * c2, di = -(a1 * s1 + a2 * s2);
+        return 10 * Math.Log10((nr * nr + ni * ni) / (dr * dr + di * di));
+    }
+
+    private static void Set(AudioMixer mixer, string name, float value)
+    {
+        if (!mixer.SetFloat(name, value)) throw new Exception("Missing exposed parameter " + name);
+    }
+
+    private static double Db(double value) => 20 * Math.Log10(Math.Max(1e-12, value));
+
+    private static double ChannelPeak(float[] data, int startFrame, int endFrame, int channel)
+    {
+        int frames = data.Length / 2; startFrame = Math.Max(0, Math.Min(frames, startFrame)); endFrame = Math.Max(startFrame, Math.Min(frames, endFrame));
+        double peak = 0; for (int frame = startFrame; frame < endFrame; frame++) peak = Math.Max(peak, Math.Abs(data[frame * 2 + channel]));
+        return peak;
     }
 
     private static void ApplyFit(AudioMixer mixer, FitSettings fit)
@@ -273,17 +565,21 @@ public static class MixerOfflineValidation
         ApplyParameterFile(mixer, Environment.GetEnvironmentVariable("GAL_COMMON_PARAMETERS_JSON"));
     }
 
-    private static void ApplyParameterFile(AudioMixer mixer, string path)
+    // previousAbi: the ABI 1 bundle has no character controls; skip only those.
+    private static void ApplyParameterFile(AudioMixer mixer, string path, bool previousAbi = false)
     {
         if (string.IsNullOrWhiteSpace(path)) return;
         ParameterSettings settings = JsonUtility.FromJson<ParameterSettings>(File.ReadAllText(path));
         if (settings == null || settings.parameters == null) throw new Exception("Invalid parameter JSON " + path);
         foreach (MixerParameter parameter in settings.parameters)
+        {
+            if (previousAbi && Array.IndexOf(CharacterParameters, parameter.name) >= 0) continue;
             if (!mixer.SetFloat(parameter.name, parameter.value)) throw new Exception("Missing exposed parameter " + parameter.name);
+        }
     }
 
     private static async Task<float[]> Render(AudioMixer mixer, string groupName, float[] sourceData,
-        string secondGroup = null, float[] secondData = null)
+        string secondGroup = null, float[] secondData = null, Action beforeDrain = null)
     {
         AudioMixerGroup group = FindGroup(mixer, groupName);
         var listenerObject = new GameObject("OfflineValidation.Listener");
@@ -333,6 +629,8 @@ public static class MixerOfflineValidation
             // tail is incorrectly counted as a candidate/baseline difference.
             source.Stop();
             if (secondSource != null) secondSource.Stop();
+            // Self-noise never drains on its own; the caller switches it off here.
+            beforeDrain?.Invoke();
             int quietBlocks = 0;
             for (int drain = 0; drain < Rate * 20 / 1024 && quietBlocks < 8; drain++)
             {

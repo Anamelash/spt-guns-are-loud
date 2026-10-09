@@ -1,0 +1,158 @@
+{
+  "profiles": [
+    {
+      "profileId": "cens-proflex-series",
+      "evidence": "FamilySurrogate",
+      "standard": "EN 352-2:2002",
+      "source": "https://www.censdigital.com/wp-content/uploads/2019/07/CENSProFlexGuide-UG510-EN-3.00.pdf",
+      "page": "18",
+      "frequenciesHz": [63, 125, 250, 500, 1000, 2000, 4000, 8000],
+      "meanDb": [26.1, 24.6, 23.2, 23.3, 23.4, 31.6, 31.8, 36.4],
+      "sdDb": [6.4, 4.6, 3.8, 3.5, 3.4, 3.6, 3.3, 4.8],
+      "apvDb": [null, null, null, null, null, null, null, null]
+    },
+    {
+      "profileId": "comtac-ii-ansi",
+      "evidence": "Measured",
+      "standard": "ANSI S3.19-1974",
+      "source": "https://www.comhead.de/media/pdf/b5/5b/9c/00172_Peltor_Comtac_XP_XS_Anleitung_1268754380.pdf",
+      "page": "2 table B2",
+      "frequenciesHz": [125, 250, 500, 1000, 2000, 3150, 4000, 6300, 8000],
+      "meanDb": [14.5, 17.7, 26.3, 31.3, 29.8, 36.7, 35.1, 37.5, 35.4],
+      "sdDb": [3, 2.9, 2.8, 2.6, 3.2, 2.7, 2.5, 2.8, 3],
+      "apvDb": [null, null, null, null, null, null, null, null, null]
+    },
+    {
+      "profileId": "comtac-iv-ultrafit-reference",
+      "evidence": "FamilySurrogate",
+      "standard": "EN 352",
+      "source": "https://multimedia.3m.com/mws/media/1142194O/3m-peltor-comtac-iv-headset-datasheet-pdf.pdf",
+      "page": "",
+      "frequenciesHz": [125, 250, 500, 1000, 2000, 4000, 8000],
+      "meanDb": [28.6, 27, 30.3, 29.2, 30.9, 31.6, 32],
+      "sdDb": [5.3, 6, 6, 5.4, 3.4, 6.6, 4.5],
+      "apvDb": [23.3, 21, 24.4, 23.8, 27.4, 25.1, 27.6]
+    },
+    {
+      "profileId": "comtac-v-foam-reference",
+      "evidence": "Measured",
+      "standard": "ANSI S3.19",
+      "source": "https://www.manualslib.com/manual/2180471/3m-Peltor-Comtac-V.html?page=4",
+      "page": "4",
+      "frequenciesHz": [125, 250, 500, 1000, 2000, 3150, 4000, 6300, 8000],
+      "meanDb": [13.6, 17.7, 28.8, 31.9, 32.3, 39.3, 39.9, 42.1, 41.4],
+      "sdDb": [null, null, null, null, null, null, null, null, null],
+      "apvDb": [null, null, null, null, null, null, null, null, null]
+    },
+    {
+      "profileId": "comtac-vi-foam-reference",
+      "evidence": "Measured",
+      "standard": "EN 352",
+      "source": "https://multimedia.3m.com/mws/media/2410397O/3m-defence-and-public-safety-catalogue-emea-english.pdf",
+      "page": "30",
+      "frequenciesHz": [125, 250, 500, 1000, 2000, 4000, 8000],
+      "meanDb": [11.6, 17.6, 30.5, 29.7, 29.4, 32.8, 38.3],
+      "sdDb": [2.3, 2.1, 2.9, 2.3, 3.2, 2.1, 4.8],
+      "apvDb": [9.3, 15.5, 27.6, 27.4, 26.2, 30.7, 33.5]
+    },
+    {
+      "profileId": "gssh-proposed",
+      "evidence": "Proposed",
+      "standard": "prototype",
+      "source": "G.A.L. proposed curve (no published table)",
+      "page": "",
+      "frequenciesHz": [125, 250, 500, 1000, 2000, 4000, 8000],
+      "meanDb": [15, 18, 22, 25, 27, 29, 29],
+      "sdDb": [null, null, null, null, null, null, null],
+      "apvDb": [null, null, null, null, null, null, null]
+    },
+    {
+      "profileId": "liberator-proposed",
+      "evidence": "Proposed",
+      "standard": "prototype",
+      "source": "G.A.L. proposed curve (no published table)",
+      "page": "",
+      "frequenciesHz": [125, 250, 500, 1000, 2000, 4000, 8000],
+      "meanDb": [15, 18, 22, 25, 27, 29, 29],
+      "sdDb": [null, null, null, null, null, null, null],
+      "apvDb": [null, null, null, null, null, null, null]
+    },
+    {
+      "profileId": "m32-proposed",
+      "evidence": "Proposed",
+      "standard": "prototype",
+      "source": "G.A.L. proposed curve (no published table)",
+      "page": "",
+      "frequenciesHz": [125, 250, 500, 1000, 2000, 4000, 8000],
+      "meanDb": [15, 18, 22, 25, 27, 29, 29],
+      "sdDb": [null, null, null, null, null, null, null],
+      "apvDb": [null, null, null, null, null, null, null]
+    },
+    {
+      "profileId": "rac-proposed",
+      "evidence": "Proposed",
+      "standard": "prototype",
+      "source": "G.A.L. proposed curve (no published table)",
+      "page": "",
+      "frequenciesHz": [125, 250, 500, 1000, 2000, 4000, 8000],
+      "meanDb": [15, 18, 22, 25, 27, 29, 29],
+      "sdDb": [null, null, null, null, null, null, null],
+      "apvDb": [null, null, null, null, null, null, null]
+    },
+    {
+      "profileId": "razor-digital-bt-family-reference",
+      "evidence": "FamilySurrogate",
+      "standard": "ANSI S3.19-1974",
+      "source": "https://manuals.plus/m/4bb12ba42f53510d01bc4c0b1b9c17185b6b4a8e99315e6a0eb70f248dd87582",
+      "page": "1",
+      "frequenciesHz": [125, 250, 500, 1000, 2000, 3150, 4000, 6300, 8000],
+      "meanDb": [17.1, 17.7, 23.4, 28.2, 32.2, 37.2, 37.9, 40.2, 38.5],
+      "sdDb": [3.3, 2.3, 2.5, 1.4, 2.6, 3.9, 3.8, 3.8, null],
+      "apvDb": [null, null, null, null, null, null, null, null, null]
+    },
+    {
+      "profileId": "sordin-pro-x-foam-family",
+      "evidence": "FamilySurrogate",
+      "standard": "ANSI",
+      "source": "https://psaafrica.co.za/wp-content/uploads/2025/03/Sordin-Supreme-Pro-X-TDS.pdf",
+      "page": "3",
+      "frequenciesHz": [125, 250, 500, 1000, 2000, 3150, 4000, 6300, 8000],
+      "meanDb": [15.3, 19.3, 24.4, 29.1, 28.6, 31.1, 34, 36.1, 34.7],
+      "sdDb": [3, 2.1, 2.8, 2.8, 2.4, 3.3, 3.2, 3.3, 2.9],
+      "apvDb": [null, null, null, null, null, null, null, null, null]
+    },
+    {
+      "profileId": "sporttac-family-reference",
+      "evidence": "FamilySurrogate",
+      "standard": "EN 352",
+      "source": "https://multimedia.3m.com/mws/media/940033O/fp3584-sporttac-pdf.pdf?fn=FP3584_SportTac.pdf",
+      "page": "1",
+      "frequenciesHz": [125, 250, 500, 1000, 2000, 4000, 8000],
+      "meanDb": [12.1, 17.9, 27, 26.8, 30.5, 38.3, 36.4],
+      "sdDb": [4.3, 3.1, 3.8, 3, 3, 3.7, 5.4],
+      "apvDb": [7.8, 14.8, 23.2, 23.8, 27.5, 34.6, 31]
+    },
+    {
+      "profileId": "tep-300-ultrafit-reference",
+      "evidence": "FamilySurrogate",
+      "standard": "EN 352-2:2020",
+      "source": "https://multimedia.3m.com/mws/media/1854243O/3m-peltor-techn-datasheet-tep-300-eu.pdf?fn=DS17043_TEP_300_EU.pdf",
+      "page": "2",
+      "frequenciesHz": [125, 250, 500, 1000, 2000, 4000, 8000],
+      "meanDb": [32.8, 30.2, 31.6, 31.2, 33, 34.4, 37.9],
+      "sdDb": [6.2, 4.5, 5.4, 4.4, 4, 4.8, 3.9],
+      "apvDb": [26.6, 25.7, 26.2, 26.8, 29, 29.6, 34]
+    },
+    {
+      "profileId": "xcel-proposed",
+      "evidence": "Proposed",
+      "standard": "prototype",
+      "source": "G.A.L. proposed curve (no published table)",
+      "page": "",
+      "frequenciesHz": [125, 250, 500, 1000, 2000, 4000, 8000],
+      "meanDb": [15, 18, 22, 25, 27, 29, 29],
+      "sdDb": [null, null, null, null, null, null, null],
+      "apvDb": [null, null, null, null, null, null, null]
+    }
+  ]
+}

@@ -39,8 +39,31 @@ one shared contrast level before the original parent effects and sends. Guns,
 grenades, VOIP, UI, music, shared returns and unknown routes are not inferred
 from the hierarchy and remain on their original groups.
 
+The native effect exposes its seven ABI 2 colouring controls as
+`GAL_ElectronicsLowShelfDb`, `GAL_ElectronicsLowShelfHz`,
+`GAL_ElectronicsPresenceDb`, `GAL_ElectronicsPresenceHz`,
+`GAL_ElectronicsNoiseDb`, `GAL_ElectronicsSaturation` and
+`GAL_ElectronicsDelayMs`, and its ABI 3 band order as
+`GAL_ElectronicsBandOrder`, all neutral in every snapshot. The Editor must have
+preloaded the current `AudioPluginGalHeadphones.dll` (copy it to
+`Assets/Plugins/x86_64`): the generator refuses an effect definition with
+other than 20 parameters, which an older DLL would give.
+
 The generated bundle is a prototype until the offline renderer confirms that
 Vanilla is identical and the fitted passive curve meets its error bound.
+
+`validate-native.ps1 -Profile <sordin|comtac2|cens> -Snapshot <Outdoor|Indoor|Bunker> -Tag <name>`
+also checks the colouring controls. `-PreviousBundle` names the bundle built
+before the current one (default: the local v1 backup); with every control at
+its default the Realistic render must match it within -90 dBFS. Self-noise is
+calibrated at the electronics bus against white noise of known level sent
+through the `NonspatialBypass` route with `Wet=0`, because the stock World,
+InGame and Master effects treat noise, tones and clipped waves differently.
+The voicing sweep compares the measured change with the RBJ design at eight
+frequencies, band order 2 must match its Butterworth design against the
+first-order edges at five frequencies, and the output stage must stay
+monotonic and under the level the hard clamp reaches for the same input. `-Tag` keeps a new report beside the
+earlier ones.
 
 The native renderer loads compiled bundles rather than Editor mixer controllers,
 whose exposed-name lookup differs from the game's hash lookup.

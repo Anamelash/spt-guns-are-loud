@@ -154,6 +154,7 @@ namespace GunsAreLoud.Client.Configuration
         internal readonly ConfigEntry<float> EarDifference;
         internal readonly ConfigEntry<HeadphonesFitPreset> HeadphonesFit;
         internal readonly ConfigEntry<HeadphoneMode> HeadphoneMode;
+        internal readonly ConfigEntry<float> HearThroughCharacter;
         internal readonly ConfigEntry<bool> PerformanceSummaryLog;
         internal readonly ConfigEntry<bool> DiagnosticShotLog;
 
@@ -409,6 +410,14 @@ namespace GunsAreLoud.Client.Configuration
                 HeadphonesFitPreset.Tight,
                 "Loose represents a compromised seal; Normal uses the baseline protection estimate; Tight represents a good seal. This setting affects the gameplay hearing-dose model, not the Realistic headset filter curve.");
 
+            HearThroughCharacter = Bind(config, "01. General", "Hear-through Character, %", 100f,
+                new ConfigDescription(
+                    "How much an active headset's own electronics colour what you hear through it in Realistic: " +
+                    "the brighter microphone voicing, a little less low end, faint hiss in quiet places and soft limiting on loud sounds. " +
+                    "100% is the estimate for each headset; 0% leaves the electronics clean, while amplification, band limits and protection stay; " +
+                    "up to 200% exaggerates it. Vanilla is unaffected.",
+                    new AcceptableValueRange<float>(0f, 200f)));
+
             Bind(config, "01. General", "Headset Diagnostics", "Live status (not a setting)",
                 new ConfigDescription("Live native DSP and mixer connection checks. Counters measure processing calls, not perceived sound quality.", null,
                     new ConfigurationManagerAttributes { CustomDrawer = Audio.HeadphoneDiagnostics.Draw, HideDefaultButton = true }));
@@ -492,7 +501,7 @@ namespace GunsAreLoud.Client.Configuration
         {
             string[] keys = {
                 "Enabled", "Preset", "Hearing Loss", "Ringing",
-                "Headset Processing", "Headset Fit", "Headset Diagnostics",
+                "Headset Processing", "Headset Fit", "Hear-through Character, %", "Headset Diagnostics",
                 "Gunshot Impact", "Gunshot Contrast, dB", "Indoor Emphasis",
                 "Hearing Loss Intensity, %", "Hearing Loss Duration, %",
                 "Ringing Intensity, %", "Ringing Duration, %", "Left/Right Ear Difference",

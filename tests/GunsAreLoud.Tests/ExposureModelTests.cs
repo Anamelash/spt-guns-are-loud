@@ -272,8 +272,10 @@ namespace GunsAreLoud.Tests
                                 field.FieldType.GetGenericTypeDefinition() == typeof(ConfigEntry<>));
 
             // 36 as of the 1.0.2 clean-up, plus the two hearing switches in General,
-            // minus Low-End Method: the pitched copy is the only low-end path.
-            Assert.That(configEntryFields, Is.EqualTo(37));
+            // minus Low-End Method: the pitched copy is the only low-end path,
+            // plus Hear-through Character in 1.1.0.
+            Assert.That(configEntryFields, Is.EqualTo(38));
+            Assert.That(_config.HearThroughCharacter, Is.Not.Null);
             Assert.That(_config.HeadphoneMode, Is.Not.Null);
             Assert.That(_config.GunshotContrastDb, Is.Not.Null);
             Assert.That(_config.LowEndNormalizationDb, Is.Not.Null);

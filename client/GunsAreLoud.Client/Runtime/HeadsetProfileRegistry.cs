@@ -42,7 +42,26 @@ namespace GunsAreLoud.Client.Runtime
             Add(result, ProposedInsert("tep-300-proposed", "Peltor TEP-300", new[] { "68bf405779c8186398099017" }));
             Add(result, Cens());
             ApplyReferenceProfiles(result);
+            ApplyDeviceElectronics(result);
             return result;
+        }
+
+        // Replaces the shared prototype with each family's own electronics
+        // (facts, family values, construction class). Passive data and ids stay.
+        private static void ApplyDeviceElectronics(Dictionary<string, HeadsetProfile> profiles)
+        {
+            var replaced = new Dictionary<HeadsetProfile, HeadsetProfile>();
+            foreach (string templateId in new List<string>(profiles.Keys))
+            {
+                HeadsetProfile profile = profiles[templateId];
+                if (!replaced.TryGetValue(profile, out HeadsetProfile device))
+                {
+                    device = profile.WithElectronics(
+                        HeadsetElectronicsComposer.Device(profile.ProfileId, profile.Electronics));
+                    replaced[profile] = device;
+                }
+                profiles[templateId] = device;
+            }
         }
 
         private static HeadsetProfile[] BuildUniqueProfiles()
@@ -95,13 +114,13 @@ namespace GunsAreLoud.Client.Runtime
             Create(id, ids, family, "unverified game revision", "item-specific", "unknown",
                 new HeadsetPassiveProfile(new[] { 125f, 250f, 500f, 1000f, 2000f, 4000f, 8000f },
                     new[] { 15f, 18f, 22f, 25f, 27f, 29f, 29f }, null,
-                    "prototype", "headphone signal-chain blueprint", "section 7", HeadsetEvidence.Proposed));
+                    "prototype", "G.A.L. proposed curve (no published table)", "", HeadsetEvidence.Proposed));
 
         private static HeadsetProfile ProposedInsert(string id, string family, string[] ids) =>
             Create(id, ids, family, "unverified game revision", "in-ear", "unspecified tip",
                 new HeadsetPassiveProfile(new[] { 125f, 250f, 500f, 1000f, 2000f, 4000f, 8000f },
                     new[] { 18f, 20f, 23f, 25f, 27f, 29f, 29f }, null,
-                    "prototype", "headphone signal-chain blueprint", "section 7", HeadsetEvidence.Proposed));
+                    "prototype", "G.A.L. proposed curve (no published table)", "", HeadsetEvidence.Proposed));
 
         private static HeadsetProfile Create(string id, string[] ids, string family, string revision,
             string mounting, string cushion, HeadsetPassiveProfile passive)
@@ -110,8 +129,10 @@ namespace GunsAreLoud.Client.Runtime
                 0.0005f, 0.010f, 0.150f, 0.5f, 100f, 10000f, true,
                 HeadsetEvidence.Proposed, HeadsetEvidence.Proposed);
             return new HeadsetProfile(id, ids, family, revision, mounting, cushion, passive, electronics,
-                new[] { "measured electronics input-output curve", "device attack and release", "complete mic and speaker response" },
-                new[] { "shared prototype electronics", "-24 dBFS threshold is an uncalibrated digital prototype and not physical SPL", "minimum-phase reconstruction from magnitude only" });
+                new[] { "measured electronics input-output curve", "device attack and release", "complete mic and speaker response",
+                    "microphone and preamplifier self-noise" },
+                new[] { "electronics derived from a construction class; published device facts kept as stated",
+                    "-24 dBFS threshold is an uncalibrated digital prototype and not physical SPL", "minimum-phase reconstruction from magnitude only" });
         }
     }
 }

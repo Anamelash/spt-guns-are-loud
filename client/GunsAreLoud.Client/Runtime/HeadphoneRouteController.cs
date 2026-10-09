@@ -56,6 +56,7 @@ namespace GunsAreLoud.Client.Runtime
         // Only consulted while the route is Realistic, which it becomes only by
         // a successful activation with exactly these levels.
         private HeadsetSendLevels _activeSends;
+        private float _activeCharacter = 1f;
         private int _generation;
 
         internal HeadphoneRouteController(IHeadphoneRouteBackend backend)
@@ -67,9 +68,11 @@ namespace GunsAreLoud.Client.Runtime
 
         internal HeadphoneRouteStatus Status => _status;
 
+        /// <param name="characterScale">Hear-through Character as a fraction (1 = 100 %).</param>
         internal bool Apply(HeadphoneMode requested, string templateId, bool force = false,
-            HeadsetSendLevels sends = default)
+            HeadsetSendLevels sends = default, float characterScale = 1f)
         {
+            if (float.IsNaN(characterScale) || float.IsInfinity(characterScale) || characterScale < 0f) characterScale = 0f;
             templateId = templateId ?? "";
             if (requested == HeadphoneMode.Vanilla)
                 return Restore(requested, templateId, HeadphoneRouteFallback.None, "native EFT route");
@@ -90,7 +93,7 @@ namespace GunsAreLoud.Client.Runtime
             // so a changed send level must reactivate even when the profile is the same.
             if (!force && _status.Effective == HeadphoneMode.Realistic &&
                 string.Equals(_activeProfileId, profile.ProfileId, StringComparison.Ordinal) &&
-                _activeSends.Equals(sends))
+                _activeSends.Equals(sends) && _activeCharacter == characterScale)
             {
                 _status = NewStatus(requested, HeadphoneMode.Realistic, templateId,
                     profile.ProfileId, HeadphoneRouteFallback.None, "complete two-path route active");
@@ -98,7 +101,12 @@ namespace GunsAreLoud.Client.Runtime
             }
 
             _activeSends = sends;
-            if (!_backend.TryActivate(profile, sends, out string reason))
+            _activeCharacter = characterScale;
+            // The worn item's own electronics: its family, moved by its template,
+            // coloured as far as the Hear-through Character control asks.
+            HeadsetProfile worn = HeadsetElectronicsComposer.Compose(profile, sends.Electronics);
+            worn = worn.WithElectronics(worn.Electronics.WithCharacterScale(characterScale));
+            if (!_backend.TryActivate(worn, sends, out string reason))
             {
                 if (string.Equals(reason, "profile-fit-pending", StringComparison.Ordinal))
                     return Fallback(requested, templateId, profile.ProfileId,

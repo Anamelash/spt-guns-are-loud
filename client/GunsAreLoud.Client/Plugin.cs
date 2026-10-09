@@ -13,7 +13,7 @@ namespace GunsAreLoud.Client
     {
         public const string Guid = "com.anamelash.gunsareloud";
         public const string Name = "Guns Are Loud";
-        public const string Version = "1.0.3";
+        public const string Version = "1.1.0";
 
         internal static ManualLogSource Log { get; private set; }
 
@@ -62,6 +62,7 @@ namespace GunsAreLoud.Client
             gameObject.AddComponent<AutomaticWarmupDiscovery>();
             gameObject.AddComponent<LowEndNormalizationMaintenance>();
             gameObject.AddComponent<GunshotContrastController>();
+            gameObject.AddComponent<ForeignMixerRouteSweeper>();
             gameObject.AddComponent<PerformanceMonitor>();
 
             HarmonyInstance = new Harmony(Guid);

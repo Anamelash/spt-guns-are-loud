@@ -33,7 +33,7 @@ namespace GunsAreLoud.Tests
             {
                 var profile = HeadsetProfileRegistry.ProfileAt(p);
                 var rows = HeadphoneInspectionValues.Build(profile, 999, 999, false);
-                Assert.That(rows.Count, Is.EqualTo(5), profile.ProfileId);
+                Assert.That(rows.Count, Is.EqualTo(9), profile.ProfileId);
                 Assert.That(rows.Select(r => r.Id).Distinct().Count(), Is.EqualTo(rows.Count));
                 Assert.That(rows.Take(3).Select(r => r.Id), Is.EqualTo(new[] {
                     HeadphoneInspectionId.Low, HeadphoneInspectionId.Mid, HeadphoneInspectionId.High }));
@@ -54,11 +54,50 @@ namespace GunsAreLoud.Tests
         }
 
         [Test]
+        public void PublishedElectronicsFactsAreTheOnlyUnstarredElectronicsRows()
+        {
+            HeadphoneInspectionId[] electronicsRows = {
+                HeadphoneInspectionId.Release, HeadphoneInspectionId.Gain, HeadphoneInspectionId.Attack,
+                HeadphoneInspectionId.MicrophoneBand, HeadphoneInspectionId.Noise, HeadphoneInspectionId.Colour };
+            for (int p = 0; p < HeadsetProfileRegistry.ProfileCount; p++)
+            {
+                var profile = HeadsetProfileRegistry.ProfileAt(p);
+                var rows = HeadphoneInspectionValues.Build(profile, 0, 0, false);
+                foreach (var id in electronicsRows)
+                {
+                    bool fact = (id == HeadphoneInspectionId.MicrophoneBand &&
+                            (profile.ProfileId == "sordin-pro-x-foam-family" || profile.ProfileId == "gssh-proposed")) ||
+                        (id == HeadphoneInspectionId.Attack && profile.ProfileId == "razor-digital-bt-family-reference");
+                    Assert.That(rows.Single(r => r.Id == id).Text.EndsWith("*"), Is.EqualTo(!fact), profile.ProfileId + " " + id);
+                }
+            }
+        }
+
+        [Test]
+        public void ElectronicsRowsShowDeviceValuesAndPublishedNotes()
+        {
+            HeadsetProfileRegistry.TryGet("5aa2ba71e5b5b000137b758f", out var sordin);
+            var rows = HeadphoneInspectionValues.Build(sordin, 0, 0, true);
+            Assert.That(rows.Single(r => r.Id == HeadphoneInspectionId.MicrophoneBand).Text, Is.EqualTo("100–10000 Гц"));
+            Assert.That(rows.Single(r => r.Id == HeadphoneInspectionId.Noise).Text, Is.EqualTo("-78 дБ*"));
+            Assert.That(rows.Single(r => r.Id == HeadphoneInspectionId.Colour).Text, Is.EqualTo("+3 дБ*"));
+            Assert.That(HeadphoneInspectionValues.ElectronicsNotes(sordin.Electronics, false), Does.Contain("82 dB(A)"));
+
+            var clean = sordin.WithElectronics(sordin.Electronics.WithCharacterScale(0f));
+            var cleanRows = HeadphoneInspectionValues.Build(clean, 0, 0, false);
+            Assert.That(cleanRows.Single(r => r.Id == HeadphoneInspectionId.Noise).Text, Is.EqualTo("off"));
+            Assert.That(cleanRows.Single(r => r.Id == HeadphoneInspectionId.Colour).Text, Is.EqualTo("+0 dB*"));
+
+            HeadsetProfileRegistry.TryGet("5645bcc04bdc2d363b8b4572", out var comtac);
+            Assert.That(HeadphoneInspectionValues.ElectronicsNotes(comtac.Electronics, false), Is.Empty);
+        }
+
+        [Test]
         public void FamilyDataIsMarkedAndBandsAverageExistingPointsWithoutDoubleCountingBoundaries()
         {
             HeadsetProfileRegistry.TryGet("5aa2ba71e5b5b000137b758f", out var profile);
             var rows = HeadphoneInspectionValues.Build(profile, 0, 0, true);
-            Assert.That(rows.All(r => r.Text.EndsWith("*")), Is.True);
+            Assert.That(rows.Where(r => r.Id != HeadphoneInspectionId.MicrophoneBand).All(r => r.Text.EndsWith("*")), Is.True);
             Assert.That(rows[0].Name, Is.EqualTo("Низкие (63–500 Гц)"));
             Assert.That(rows[0].Value, Is.EqualTo((15.3f + 19.3f) / 2).Within(.0001));
             Assert.That(rows[1].Value, Is.EqualTo((24.4f + 29.1f) / 2).Within(.0001));

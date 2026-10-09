@@ -18,9 +18,17 @@ namespace GunsAreLoud.Tests
             Assert.That(BlastExposureState.Severity(8, true, 4, 2, 0), Is.EqualTo(1));
         }
         [Test]
-        public void ProtectionUsesEnergyRatioAndZeroDistanceIsBounded()
+        public void ProtectionTakesAShareInDecibelsAndZeroDistanceIsBounded()
         {
-            Assert.That(BlastExposureState.Severity(4, false, 4, 2, 10), Is.EqualTo(.1f).Within(.0001));
+            Assert.That(BlastExposureState.Severity(4, false, 4, 2, 17.5f), Is.EqualTo(.5f).Within(.0001));
+            Assert.That(BlastExposureState.Severity(8, false, 4, 2, 17.5f), Is.EqualTo(.125f).Within(.0001),
+                "the protected share applies on top of the unprotected distance law");
+            Assert.That(BlastExposureState.Severity(1, true, 4, 2, 35f), Is.Zero);
+            Assert.That(BlastExposureState.Severity(1, true, 4, 2, 50f), Is.Zero);
+            Assert.That(BlastExposureState.Severity(1, true, 4, 2, float.NaN), Is.EqualTo(1));
+            for (float db = 0; db < 35f; db += 2.5f)
+                Assert.That(BlastExposureState.Severity(2, true, 4, 2, db + 2.5f),
+                    Is.LessThan(BlastExposureState.Severity(2, true, 4, 2, db)), "more protection always means less effect");
             Assert.That(BlastExposureState.Severity(0, false, 4, 2, 0), Is.EqualTo(1));
             Assert.That(BlastExposureState.Severity(float.NaN, false, 4, 2, 0), Is.Zero);
         }

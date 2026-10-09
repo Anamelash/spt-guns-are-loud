@@ -104,6 +104,17 @@ namespace GunsAreLoud.Client.Runtime
             }
         }
 
+        // Blast hearing loss at full strength: a broadband loss plus a one-pole
+        // low-pass, so the low end stays as a dull, quiet remainder while the
+        // highs go. The severe phase, reached only without protection, is 30 %
+        // quieter in amplitude and closes 30 % lower than the ordinary ceiling:
+        // about -28 dB at 100 Hz, -42 dB at 1 kHz and -54 dB at 4 kHz at its
+        // peak. Hearing is never cut to silence: what stays is the low end.
+        internal const float SevereBlastAttenuationDb = 27f;
+        internal const float SevereBlastCutoffHz = 175f;
+        internal const float BlastAttenuationDb = 18f;
+        internal const float BlastCutoffHz = 250f;
+
         internal void HandleExplosion(float distance, bool sourceIndoor, Vector3 position)
         {
             var audio = AudioRuntimeLookup.Audio;
@@ -314,9 +325,9 @@ namespace GunsAreLoud.Client.Runtime
                     _config.BlastRingingStrength.Value,
                     HearingResponseModel.TinnitusCeiling(tuning))
                 : 0f;
-            float attenuation = (blast.Severe ? 60f : 35f) * loss;
+            float attenuation = (blast.Severe ? SevereBlastAttenuationDb : BlastAttenuationDb) * loss;
             int sampleRate = AudioRuntimeState.OutputSampleRate;
-            float cutoff = Mathf.Lerp(sampleRate * .49f, 350f, loss);
+            float cutoff = Mathf.Lerp(sampleRate * .49f, blast.Severe ? SevereBlastCutoffHz : BlastCutoffHz, loss);
             bool enabled = response.ProcessingActive || loss > .0001f || ring > .000001f;
             float wetLeft = loss > 0 ? 1f : response.HearingLeft;
             float wetRight = loss > 0 ? 1f : response.HearingRight;

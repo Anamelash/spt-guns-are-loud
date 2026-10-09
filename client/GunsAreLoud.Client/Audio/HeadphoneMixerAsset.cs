@@ -24,6 +24,13 @@ namespace GunsAreLoud.Client.Audio
         private static bool _attempted;
         private static HeadphoneGlobalControlBridge _globalControls;
         internal static GunshotContrastMixerRouter ContrastRoutes { get; private set; }
+        /// <summary>
+        /// Stock world group to replacement group, for sources whose prefab
+        /// references the stock asset directly. Null when the replacement did not
+        /// load or the pairing was abandoned; those sources then stay where they
+        /// are, as they did before the map existed.
+        /// </summary>
+        internal static StockMixerGroupMap StockGroupMap { get; private set; }
         private static float _nextControlLog;
         private static float _nextControlSync;
         private static string _lastControlLog;
@@ -102,6 +109,15 @@ namespace GunsAreLoud.Client.Audio
                         !candidate.GetFloat(prefix + "Q", out float width) || !(width > 0f))
                         throw new InvalidOperationException("passive band contract invalid: " + band);
                 }
+                // The DSP ABI 2 colouring controls: present, and neutral until a
+                // route writes them, so the asset on its own changes nothing.
+                foreach (var parameter in Runtime.TransactionalMixerHeadphoneRoute.CharacterParameters)
+                    if (!candidate.GetFloat(parameter.Name, out float value) ||
+                        Math.Abs(value - parameter.Neutral) > 0.0001f)
+                        throw new InvalidOperationException("electronics character contract invalid: " + parameter.Name);
+                if (!candidate.GetFloat(Runtime.TransactionalMixerHeadphoneRoute.ElectronicsBandOrder, out float bandOrder) ||
+                    Math.Abs(bandOrder - Runtime.TransactionalMixerHeadphoneRoute.NeutralBandOrder) > 0.0001f)
+                    throw new InvalidOperationException("electronics band order contract invalid");
                 foreach (string path in new[] { "World/GAL Passive/NonspatialBypass", "World/GAL Passive/Guns/Gunshots",
                     "World/GAL Passive/Main/Environment", "World/GAL Passive/Occlusion/SimpleOccluded", "World/Headphones/GunCompressor",
                     "World/GAL Electronics" })
@@ -118,6 +134,17 @@ namespace GunsAreLoud.Client.Audio
                         contrastFailure);
                 _mixer = candidate;
                 ContrastRoutes = contrastReady ? contrastRoutes : null;
+                // Sources whose prefab references the stock asset are the BTR,
+                // precipitation, wind and the like. Without this pairing they
+                // play outside every headset path; with a bad pairing they would
+                // play on the wrong group, so it fails open per group and as a whole.
+                StockGroupMap = StockMixerGroupMap.TryCreate(original, candidate, out string mapFailure);
+                if (StockGroupMap == null)
+                    Plugin.Log?.LogWarning(
+                        "Stock mixer group map unavailable; sources referencing the stock mixer stay there: " +
+                        mapFailure);
+                else
+                    Plugin.Log?.LogInfo("Stock mixer group map ready: " + StockGroupMap.Describe());
                 _globalControls = new HeadphoneGlobalControlBridge(
                     new Runtime.UnityMixerParameterStore(original), new Runtime.UnityMixerParameterStore(candidate));
                 if (!_globalControls.Tick()) throw new InvalidOperationException("global mixer control bridge initialization failed");
@@ -134,6 +161,7 @@ namespace GunsAreLoud.Client.Audio
                 _mixer = null;
                 _globalControls = null;
                 ContrastRoutes = null;
+                StockGroupMap = null;
                 return null;
             }
         }

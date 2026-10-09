@@ -31,6 +31,7 @@ namespace GunsAreLoud.Client.Runtime
         WarmupCompose,
         WarmupPublish,
         WarmupRegister,
+        ForeignRouteSweep,
         Count
     }
 
@@ -747,6 +748,7 @@ namespace GunsAreLoud.Client.Runtime
                 case PerformanceArea.WarmupLoad: return "warmupLoad";
                 case PerformanceArea.WarmupCompose: return "warmupCompose";
                 case PerformanceArea.WarmupPublish: return "warmupPublish";
+                case PerformanceArea.ForeignRouteSweep: return "foreignRouteSweep";
                 default: return "warmupRegister";
             }
         }

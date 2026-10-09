@@ -24,7 +24,7 @@ if (-not $SkipBuild) {
     if ($LASTEXITCODE -ne 0) { throw "Preloader build failed" }
 }
 $native = Join-Path $repoRoot 'native\GalHeadphoneAudioPlugin\artifacts\win-x64\AudioPluginGalHeadphones.dll'
-if (!(Test-Path $native) -or (Get-FileHash $native).Hash -ne '5B9CB1DF468A40689137D7AA39E049AC9CA4E6EB7AD2A428CEF4DF47A07CE6A1') { throw 'Pinned native DSP missing or changed' }
+if (!(Test-Path $native) -or (Get-FileHash $native).Hash -ne '7D80CC6E817E2D0D9D31724596BB4FE9AF3AE07E65E8BBDE1F8B10FBBC9324C8') { throw 'Pinned native DSP missing or changed' }
 
 $dist = Join-Path $repoRoot "dist"
 $stage = [IO.Path]::GetFullPath((Join-Path $dist "stage"))

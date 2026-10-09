@@ -260,6 +260,27 @@ namespace GunsAreLoud.Tests
         }
 
         [Test]
+        public void HearThroughCharacterIsAVisibleGeneralPercentNextToTheHeadsetSettings()
+        {
+            var file = new ConfigFile(
+                Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".cfg"), false)
+                { SaveOnConfigSet = false };
+            var config = new ModConfig(file);
+
+            ConfigDefinition definition = file.Keys.First(key => key.Key == "Hear-through Character, %");
+            Assert.That(definition.Section, Is.EqualTo("01. General"));
+            Assert.That(config.HearThroughCharacter.Value, Is.EqualTo(100f));
+            var range = (AcceptableValueRange<float>)config.HearThroughCharacter.Description.AcceptableValues;
+            Assert.That(range.MinValue, Is.EqualTo(0f));
+            Assert.That(range.MaxValue, Is.EqualTo(200f));
+
+            int Order(string key) => file[file.Keys.First(entry => entry.Key == key)].Description.Tags
+                .OfType<ConfigurationManagerAttributes>().Last(tag => tag.Order.HasValue).Order.Value;
+            Assert.That(Order("Hear-through Character, %"), Is.LessThan(Order("Headset Fit")));
+            Assert.That(Order("Hear-through Character, %"), Is.GreaterThan(Order("Headset Diagnostics")));
+        }
+
+        [Test]
         public void LateReportToleranceIsAnAdvancedControlThatScalesTheShippedBudget()
         {
             var file = new ConfigFile(

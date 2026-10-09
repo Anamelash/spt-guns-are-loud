@@ -42,6 +42,7 @@ namespace GAL
         {
             RequireEffect("Meta XR Audio Reflection");
             RequireEffect("GAL Headphone Electronics");
+            RequireParameterCount("GAL Headphone Electronics", ElectronicsParameterCount);
             if (AssetDatabase.LoadAssetAtPath<AudioMixer>(RawSource) == null)
                 throw new InvalidOperationException("Missing immutable raw source " + RawSource);
             AssetDatabase.DeleteAsset(Baseline);
@@ -209,12 +210,31 @@ namespace GAL
                 new[] { "Release", "GAL_ElectronicsRelease" },
                 new[] { "Ceiling", "GAL_ElectronicsCeiling" },
                 new[] { "Wet", "GAL_ElectronicsWet" },
-                new[] { "Reset", "GAL_ElectronicsReset" }
+                new[] { "Reset", "GAL_ElectronicsReset" },
+                // ABI 2 character controls, appended after the ABI 1 slots.
+                new[] { "Low shelf", "GAL_ElectronicsLowShelfDb" },
+                new[] { "Low shelf freq", "GAL_ElectronicsLowShelfHz" },
+                new[] { "Presence", "GAL_ElectronicsPresenceDb" },
+                new[] { "Presence freq", "GAL_ElectronicsPresenceHz" },
+                new[] { "Noise", "GAL_ElectronicsNoiseDb" },
+                new[] { "Saturation", "GAL_ElectronicsSaturation" },
+                new[] { "Delay", "GAL_ElectronicsDelayMs" },
+                // ABI 3: microphone band edge order.
+                new[] { "Band order", "GAL_ElectronicsBandOrder" }
             };
             foreach (string[] parameter in parameters)
                 Expose(controller, group, effect, "GetGUIDForParameter", parameter[0], parameter[1]);
             SetEffectValue(controller, effect, "Wet", 0f);
             SetEffectValue(controller, effect, "Reset", 0f);
+            // Neutral in every snapshot: each one leaves its DSP stage out.
+            SetEffectValue(controller, effect, "Low shelf", 0f);
+            SetEffectValue(controller, effect, "Low shelf freq", 200f);
+            SetEffectValue(controller, effect, "Presence", 0f);
+            SetEffectValue(controller, effect, "Presence freq", 3200f);
+            SetEffectValue(controller, effect, "Noise", -120f);
+            SetEffectValue(controller, effect, "Saturation", 0f);
+            SetEffectValue(controller, effect, "Delay", 0f);
+            SetEffectValue(controller, effect, "Band order", 1f);
         }
 
         private static void AddElectronicsSends(object controller, IList groups, object receive)
@@ -514,7 +534,10 @@ namespace GAL
                 "GAL_ElectronicsMicLP", "GAL_ElectronicsQuietGain",
                 "GAL_ElectronicsThreshold", "GAL_ElectronicsRatio", "GAL_ElectronicsKnee",
                 "GAL_ElectronicsAttack", "GAL_ElectronicsHold", "GAL_ElectronicsRelease",
-                "GAL_ElectronicsCeiling", "GAL_ElectronicsWet", "GAL_ElectronicsReset" }
+                "GAL_ElectronicsCeiling", "GAL_ElectronicsWet", "GAL_ElectronicsReset",
+                "GAL_ElectronicsLowShelfDb", "GAL_ElectronicsLowShelfHz", "GAL_ElectronicsPresenceDb",
+                "GAL_ElectronicsPresenceHz", "GAL_ElectronicsNoiseDb", "GAL_ElectronicsSaturation",
+                "GAL_ElectronicsDelayMs", "GAL_ElectronicsBandOrder" }
             .Concat(Enumerable.Range(1, 9)
                 .SelectMany(i => new[] { $"GAL_PassiveBand{i}Gain",
                     $"GAL_PassiveBand{i}Frequency", $"GAL_PassiveBand{i}Q" }))
@@ -538,6 +561,21 @@ namespace GAL
                 .Invoke(null, new object[] { name });
             if (!exists) throw new InvalidOperationException(
                 "Required original mixer effect unavailable in editor: " + name);
+        }
+
+        // ABI 3 of the native DSP. An Editor that preloaded an older DLL would
+        // compile the effect with its shorter parameter list.
+        private const int ElectronicsParameterCount = 20;
+
+        private static void RequireParameterCount(string name, int expected)
+        {
+            Type definitions = typeof(Editor).Assembly.GetType(
+                "UnityEditor.Audio.MixerEffectDefinitions", true);
+            Array parameters = (Array)definitions.GetMethod("GetEffectParameters", Flags)
+                .Invoke(null, new object[] { name });
+            if (parameters == null || parameters.Length != expected)
+                throw new InvalidOperationException($"{name} exposes {parameters?.Length ?? -1} " +
+                    $"parameters in the editor; expected {expected}. Preload the current native DLL.");
         }
         private const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Static |
             BindingFlags.Public | BindingFlags.NonPublic;

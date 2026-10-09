@@ -5,6 +5,7 @@ Checks native compiled DSP data, not only exposed editor properties.
 """
 import json
 import sys
+import zlib
 from pathlib import Path
 import UnityPy
 
@@ -101,10 +102,26 @@ for _,send in sends:
     assert set(value(candidate,send['wetMixLevelIndex']).values())=={-80}, 'New send not silent in Vanilla'
 assert set(value(candidate,candidate['groups'][electronics_index]['volumeIndex']).values())=={-80}
 assert set(value(candidate,candidate['groups'][passive_index]['volumeIndex']).values())=={0}
-native = [e for _,e in electronic_effects if e['type']>=1000]
-assert len(native)==1 and len(native[0]['parameterIndices'])==12
+native_effects = [(i,e) for i,e in electronic_effects if e['type']>=1000]
+assert len(native_effects)==1 and len(native_effects[0][1]['parameterIndices'])==20, 'Native DSP ABI 3 has 20 parameters'
+native_index, native = native_effects[0]
+native = [native]
 for slot in (10,11):
     assert set(value(candidate,native[0]['parameterIndices'][slot]).values())=={0}, 'Wet/reset not neutral'
+# ABI 2 character controls and the ABI 3 band order: exposed under these names, bound to these slots,
+# and neutral in every snapshot so the asset alone never colours the sound.
+character = [('GAL_ElectronicsLowShelfDb',12,0),('GAL_ElectronicsLowShelfHz',13,200),
+             ('GAL_ElectronicsPresenceDb',14,0),('GAL_ElectronicsPresenceHz',15,3200),
+             ('GAL_ElectronicsNoiseDb',16,-120),('GAL_ElectronicsSaturation',17,0),
+             ('GAL_ElectronicsDelayMs',18,0),('GAL_ElectronicsBandOrder',19,1)]
+native_guid = ref(candidate,'effect',native_index)
+for name, slot, neutral in character:
+    index = native[0]['parameterIndices'][slot]
+    assert set(value(candidate,index).values())=={neutral}, f'{name} not neutral in every snapshot'
+    h = zlib.crc32(name.encode())
+    assert h in new_exposed, f'{name} is not exposed'
+    assert new_exposed[h]==index, f'{name} is exposed on the wrong parameter'
+    assert new_owners.get(index)==('effect',native_guid,slot), f'{name} bound to {new_owners.get(index)}'
 candidate_paths=paths(candidate)
 contrast_indices=[i for i,path in enumerate(candidate_paths)
                   if new_names[i]=='GAL Contrast Input']
@@ -118,6 +135,7 @@ for index in contrast_indices:
 report={'originalGroups':len(old_groups),'originalEffects':len(original['effects']),
         'originalExposed':len(old_exposed),'candidateEffects':len(candidate['effects']),
         'electronicsFeeds':len(sends),'contrastInputs':len(contrast_indices),
+        'nativeParameters':len(native[0]['parameterIndices']),'characterControls':len(character),
         'differences':errors}
 print(json.dumps(report,indent=2))
 sys.exit(bool(errors))

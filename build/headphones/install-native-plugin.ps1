@@ -9,7 +9,7 @@ $ErrorActionPreference = 'Stop'
 $supportedGame = 'D:\Games\SPT_4.1.3'
 $baselineGlobalHash = 'E75E77D831BCCCD96981896147F53F572EF78B4AC22FCE1FCBB8DC93AF3079F9'
 # Pinned only after the DLL passed actual Unity 2022.3 Editor registration.
-$pluginHash = '5B9CB1DF468A40689137D7AA39E049AC9CA4E6EB7AD2A428CEF4DF47A07CE6A1'
+$pluginHash = '7D80CC6E817E2D0D9D31724596BB4FE9AF3AE07E65E8BBDE1F8B10FBBC9324C8'
 $pluginName = 'AudioPluginGalHeadphones'
 $scriptRoot = Split-Path -Parent $PSCommandPath
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $scriptRoot '..\..'))

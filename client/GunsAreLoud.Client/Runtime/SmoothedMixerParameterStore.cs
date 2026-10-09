@@ -61,10 +61,19 @@ namespace GunsAreLoud.Client.Runtime
             else if (!_mixer.GetFloat(name, out current)) return false;
             // Reset is a discrete generation token. Interpolating it would
             // publish many fractional generations and repeatedly reset native
-            // detector state during one transition.
+            // detector state during one transition. Delay is a whole number of
+            // samples; gliding it would slide the read point through the line.
+            // Band order selects a filter structure; it has no in-between.
             if (RequiresImmediateSet(name))
             {
                 _ramps.Remove(name);
+                if (name != ResetParameter) return _mixer.SetFloat(name, value);
+                // The same generation again is not a restart: nothing to defer.
+                if (value == current)
+                {
+                    _hasDeferredReset = false;
+                    return _mixer.SetFloat(name, value);
+                }
                 float wet = Current("GAL_ElectronicsWet");
                 float volume = Current("GAL_ElectronicsVolume");
                 if (ShouldDeferReset(value, current, wet, volume))
@@ -80,8 +89,10 @@ namespace GunsAreLoud.Client.Runtime
             return true;
         }
 
+        private const string ResetParameter = "GAL_ElectronicsReset";
+
         internal static bool RequiresImmediateSet(string name) =>
-            name == "GAL_ElectronicsReset";
+            name == ResetParameter || name == "GAL_ElectronicsDelayMs" || name == "GAL_ElectronicsBandOrder";
 
         internal static bool ShouldDeferReset(float targetReset, float currentReset,
             float wet, float volumeDb) => targetReset <= currentReset &&

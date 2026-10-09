@@ -32,7 +32,9 @@ namespace GunsAreLoud.Client.Audio
         private int _fallbackFiltersCreated;
         // Sources whose group belongs to a mixer this mod did not replace: they
         // are outside our routing graph, so only a per-source filter can reach
-        // them. Counted separately to decide whether that is worth keeping.
+        // them. StockMixerGroupMap moves such sources onto the replacement as
+        // they are set up, so in a raid this should stay near zero; a group
+        // that keeps appearing here is one the map could not pair.
         internal int ForeignMixerSources => _foreignMixerSources.Count;
         private readonly HashSet<int> _foreignMixerSources = new HashSet<int>();
         private readonly Dictionary<int, LinkedListNode<Entry>> _entries = new Dictionary<int, LinkedListNode<Entry>>();

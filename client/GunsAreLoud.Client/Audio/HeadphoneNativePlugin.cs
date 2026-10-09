@@ -24,12 +24,22 @@ namespace GunsAreLoud.Client.Audio
             {
                 // Deliberately never load the DLL here. Unity must have registered
                 // its effect definitions during player startup, before mixer load.
-                if (!TryRead("GAL_HeadphonesAbiVersion", out int abi) || abi != 1)
-                { reason = "native headphone effect was not preloaded with the supported ABI"; return false; }
-                reason = "";
-                return true;
+                return AcceptsAbi(TryRead("GAL_HeadphonesAbiVersion", out int abi), abi, out reason);
             }
             catch (Exception error) { reason = "native headphone registration: " + error.Message; return false; }
+        }
+
+        // The embedded mixer addresses the effect's parameters by slot, so only
+        // the ABI it was compiled against may load it.
+        internal const int SupportedAbi = 3;
+
+        internal static bool AcceptsAbi(bool available, int abi, out string reason)
+        {
+            if (!available) reason = "native headphone effect was not preloaded";
+            else if (abi == SupportedAbi) reason = "";
+            else if (abi < SupportedAbi) reason = $"native DSP ABI {abi} is older than the mixer asset";
+            else reason = $"native DSP ABI {abi} is newer than the mixer asset";
+            return reason.Length == 0;
         }
 
         internal static int InstanceCount => TryRead("GAL_HeadphonesInstanceCount", out int count) ? count : 0;

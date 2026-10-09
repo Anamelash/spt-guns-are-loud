@@ -1,5 +1,18 @@
 # Changes from vanilla
 
+## 1.1.0 - headset electronics and grenades
+
+- In Realistic, an active headset no longer sounds like perfectly clear open ears. Its electronics now carry the character of the real device: the band its microphones pass, with steep edges, a lift in the presence region around 3 kHz and a little less low end, a faint hiss in a quiet room that disappears under ambience and gunfire, and loud sounds rounded off into the limit instead of cut flat. A premium digital Sordin, ComTac V or VI or Ops-Core is the cleanest and quietest. Consumer models such as the Walker's Razor or Earmor M32 amplify more, hiss more and react slower, so the first crack of a shot gets through before they clamp; the analog GSSh-01 and ComTac II react slowly too, and the GSSh-01 has the narrow 300-7000 Hz band of its own specification.
+- How much each headset amplifies quiet sounds, and how fast it recovers after a loud one, now differs by headset and follows the game's own settings for each variant instead of being the same for all.
+- Where makers publish a figure (the Sordin microphone range, the GSSh-01 working range, the Walker's Razor response time) it is used exactly as published. Everything else is an estimate from the headset's construction.
+- General adds Hear-through Character, 100% by default. 0% removes the hiss and colouring while keeping amplification, band limits and protection; up to 200% exaggerates them. Vanilla is unaffected.
+- Headset inspection adds the compressor attack, the microphone band, the electronics noise and the colouring, and shows the maker's own figures in the tooltip. A star still marks an estimate rather than published data.
+- A headset now softens a grenade's stun instead of nearly cancelling it. Ordinary ear cups take about half of the effect off, so a close blast indoors still muffles your hearing and rings, though without the minutes-long near-deafness of an unprotected ear. High-rated in-ear protection shields more. Without protection the exposure is unchanged.
+- A grenade's hearing loss no longer silences everything: a dull, quiet low end stays audible while the higher frequencies drop away, and it clears as the effect recovers. A close blast on bare ears pushes it furthest.
+- Fixes the sound briefly dropping out with an active headset in Realistic while loading rounds, moving an item to the sling slot, refilling a magazine or chambering a round. The game re-applies the worn headset on every such action; the headset processing now carries on when the headset has not changed.
+- Fixes the BTR's engine, rain, wind and a few other world sounds being heard straight through an active headset, as if it were not worn, in Vanilla and Realistic alike. Those sounds now pass through the headset like everything else, from the moment they start. The same applies to scene ambience, synchronized loops, radio broadcasts and trigger sounds.
+- All three files in the archive change in this version. Replace all of them: a mixed installation keeps the headset on Vanilla.
+
 ## 1.0.3 - automatic fire timing
 
 - Fixes an extra shot heard a second or two after a long burst with some automatic weapons. Many of them fire faster than the beat of their own recording, and the added report copies followed that beat, so each was placed a little later than the one before; after a long burst the last copy was still queued seconds ahead and sounded once the trigger was released. The copies now follow the rate the weapon actually fires at, and one that would still land too far ahead of its round is brought forward instead.

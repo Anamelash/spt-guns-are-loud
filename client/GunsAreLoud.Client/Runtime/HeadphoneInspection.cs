@@ -22,6 +22,8 @@ namespace GunsAreLoud.Client.Runtime
         private string _lastKey;
         private static string Culture => LocalizationManager._instance?.Culture ?? "en";
         private static bool Russian => Culture.StartsWith("ru", StringComparison.OrdinalIgnoreCase);
+        private static float CharacterScale => Plugin.ModConfig == null ? 1f
+            : Mathf.Clamp(Plugin.ModConfig.HearThroughCharacter.Value, 0f, 200f) / 100f;
         private static HeadphoneMode Requested => Plugin.ModConfig != null && Plugin.ModConfig.Enabled.Value
             ? Plugin.ModConfig.HeadphoneMode.Value : HeadphoneMode.Vanilla;
 
@@ -30,7 +32,8 @@ namespace GunsAreLoud.Client.Runtime
             get
             {
                 var status = HeadphoneRouteRuntime.Instance?.Status ?? default;
-                return Requested + "|" + Culture + "|" + status.TemplateId + "|" + status.Effective + "|" + status.Fallback;
+                return Requested + "|" + Culture + "|" + status.TemplateId + "|" + status.Effective + "|" + status.Fallback +
+                    "|" + CharacterScale.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
         }
 
@@ -74,13 +77,24 @@ namespace GunsAreLoud.Client.Runtime
             }
             item.Attributes.RemoveAll(a => a.Id is HeadphoneInspectionId);
             if (!realistic && template == null) { stamp.Key = key; return; }
-            var rows = HeadphoneInspectionValues.Build(realistic ? profile : null,
+            // The inspected item's own electronics: its template moves the class,
+            // and the Hear-through Character control scales the colouring shown.
+            HeadsetProfile shown = null;
+            if (realistic)
+            {
+                shown = HeadsetElectronicsComposer.Compose(profile, HeadsetTemplateElectronics.From(template));
+                shown = shown.WithElectronics(shown.Electronics.WithCharacterScale(CharacterScale));
+            }
+            string electronicsNotes = HeadphoneInspectionValues.ElectronicsNotes(shown?.Electronics, russian);
+            var rows = HeadphoneInspectionValues.Build(shown,
                 template?.CompressorRelease ?? 0, template?.CompressorGain ?? 0, russian);
             foreach (var row in rows)
             {
                 string tooltip = note;
                 if (string.IsNullOrEmpty(tooltip) && (int)row.Id > 0)
                     tooltip = russian ? "Пассивное ослабление в режиме Realistic." : "Passive attenuation in Realistic mode.";
+                else if (string.IsNullOrEmpty(tooltip) && realistic)
+                    tooltip = electronicsNotes;
                 item.Attributes.Add(new ItemAttribute(row.Id)
                 {
                     Name = row.Name,

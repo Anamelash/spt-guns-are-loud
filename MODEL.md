@@ -248,7 +248,31 @@ p_ear(t)  = p_pass(t) + p_elec(t)
 
 The passive path is always present and frequency dependent. The electronic path represents external microphones, band limitation, level-dependent gain, and the internal speakers. Loud sound reduces the shared stereo-linked electronic gain; attack, hold, and recovery continue across every source and every bullet instead of resetting per shot.
 
-The electronic model uses +6 dB quiet gain, a -24 dBFS threshold, 6 dB knee, 10:1 ratio, 0.5 ms attack, 10 ms hold, 150 ms release, a 0.5 linear output ceiling, and a 100-10,000 Hz microphone band. These are engineering defaults, not measured specifications of every represented headset. In particular, dBFS is not dB SPL.
+All headsets share a -24 dBFS threshold, 6 dB knee, 10:1 ratio, 10 ms hold and a 0.5 linear output ceiling. These are engineering defaults, not measured specifications; in particular, dBFS is not dB SPL.
+
+### Electronics character
+
+A real hear-through path is not transparent. Its chain is
+
+```text
+microphone band -> + preamplifier noise -> voicing (low shelf, presence peak)
+  -> level-dependent gain -> output stage (soft saturation under the ceiling) -> converter delay
+```
+
+- **Band and voicing.** The outer-cup microphone and the small speaker in a closed cup limit the band and lift the 2–5 kHz presence region, which owners describe as "sharper" or "tinny". The presence peak is fixed at 3.2 kHz with Q 1.2; the second-order low shelf turns at 200 Hz. Every headset class limits the band with Butterworth edges (12 dB per octave) at its microphone corners; first-order edges left a stated 300–7000 Hz range almost unheard. Only an unknown headset keeps the first-order prototype band.
+- **Self-noise.** Microphone and preamplifier noise enters before the gain, so it rises with the quiet gain and sinks when loud sound compresses the path. Detection thresholds measured with electronic protectors in quiet rooms are higher than without them and are explained by this noise; in background noise they match ([Thompson, Gallagher and Pryor, JASA 2023](https://doi.org/10.1121/10.0023764)). The level is a listening calibration, not a measurement: classes keep their relative order, and one anchor sets the whole scale so the hiss stays just above threshold in a quiet hideout.
+- **Output stage.** At saturation 0 the ceiling is a hard limit. Above 0 the signal is linear up to `ceiling * (1 - saturation)` and bends into the ceiling with a tanh knee, monotonically and without ever reaching it.
+- **Delay.** Digital paths add a few milliseconds, applied in whole samples to the electronic path only.
+
+Makers publish almost none of this. Each field is taken, in order of precedence, from:
+
+1. a **published fact** of the device, never overridden: the Sordin Supreme Pro-X microphone range 100 Hz–10 kHz, the GSSh-01 working range 300–7000 Hz, and the Walker's Razor compression time of 0.02 s used as attack. Published values in other units (Sordin's 82 dB(A) sound limit, the GSSh-01 115 dB threshold, SportTac critical levels, the M32 Plus 82 dB activation level, the Liberator Move-mode figure) are shown in inspection but not mapped to the DSP, because they have no calibrated dBFS meaning;
+2. a **family value** for a few headsets, such as the quieter amplification of the Tactical Sport or the hotter one of the Walker's Razor;
+3. a **construction class**: over-ear digital premium, over-ear analog military, over-ear consumer analog or digital, in-ear digital, or hybrid. Classes set quiet gain, band, voicing, noise, attack, release, saturation and delay.
+
+Only class values may be moved by the worn item's EFT template, inside fixed bounds: quiet gain by up to ±2 dB around the common template gain, release to the template's 120–320 ms, analog attack to its 1–40 ms, saturation to three times its distortion (at most 0.6), and the microphone high-pass to its 150–300 Hz. Items of one family thereby differ as their templates do, while the absolute calibration stays with the model. Every derived value is marked as proposed.
+
+The F12 `Hear-through Character` control scales the colouring only: voicing and saturation linearly, noise by `20·log10(scale)` dB, with 0 % switching every colouring stage off. Gain, band, dynamics and, above 0 %, delay belong to the device and do not move with it.
 
 ### Passive profiles and evidence
 
@@ -266,21 +290,31 @@ The `Headset Fit` F12 setting adjusts the separate gameplay exposure estimate de
 
 The model covers world audio, including spatial speech and VOIP. UI, music, inventory-interface sounds, and nonspatial chat are outside the external acoustic field. If the headset ID is unknown, the mixer route is incomplete, or the native DSP is unavailable, the entire headset route returns to `Vanilla`.
 
+### Sources that reference the stock mixer
+
+The replacement mixer is installed when BetterAudio loads `Audio/MasterMixer`, and every source that asks BetterAudio for a group lands on it. Some prefabs carry a serialized group instead: the BTR engine and movement loops, the precipitation and wind blenders, scene ambient emitters, synchronized loops, radio broadcasts, trigger sounds with a forced group, and sources under a custom occluder output. Those references resolve to the stock asset, which stays alive for the menu. Nothing processes a source there: EFT writes the worn headset's template to `BetterAudio.Master` only, and the passive bus and electronics exist only in the replacement.
+
+At mixer load the mod pairs each stock group below `World` with its namesake below `GAL Passive`. A name unique in both mixers is its own proof; same-named groups such as `Occlusion` and `Occlusion/Occlusion` are told apart through the contrast route paths, deepest first. A group with no unambiguous pair is left alone and listed once in the log. Patches on the game's assignment points move a source as it is set up, and a budgeted scene sweep moves any that no code touches. The move changes only the source's output group and writes no mixer parameter, so in `Vanilla` the sound is unchanged and in `Realistic` it takes the same path as every other world sound.
+
 ## Headset inspection
 
-Inspection reads the same client-side profile as the Realistic DSP; no server item-template changes are required. Realistic displays passive attenuation as three arithmetic averages of the available reference points: low (63 Hz to below 500 Hz), mid (500 Hz to below 2 kHz), and high (2–8 kHz), plus compressor release and quiet gain. These averages simplify the interface only; audio calculations retain the full curve.
+Inspection reads the same client-side profile as the Realistic DSP; no server item-template changes are required. Realistic displays passive attenuation as three arithmetic averages of the available reference points: low (63 Hz to below 500 Hz), mid (500 Hz to below 2 kHz), and high (2–8 kHz). These averages simplify the interface only; audio calculations retain the full curve. The electronics rows show the inspected item's own values at the current `Hear-through Character`: compressor release, quiet gain and attack, microphone band, electronics noise and colouring (the presence lift). Published notes of the device appear in their tooltip.
 
-Vanilla displays only its compressor release and gain. Characteristic labels do not carry a mode prefix. An asterisk marks a family-surrogate or proposed value, not every value calculated from a documented curve. Unknown headset profiles retain the stock route.
+Vanilla displays only its compressor release and gain. Characteristic labels do not carry a mode prefix. An asterisk marks a family-surrogate or proposed value, judged per value: the Sordin and GSSh-01 microphone bands and the Walker's Razor attack are published and carry none. Unknown headset profiles retain the stock route.
 
 ## Explosion exposure and recovery
 
 Grenade playback enters the headset world-audio path. Its hearing after-effect is separate from shot accumulation. Let `d` be distance in metres, `R` the outdoor close-blast radius, `M` the indoor radius multiplier, and `P` the passive low-band protection estimate in dB:
 
 ```text
-outdoor exposure = (R / max(0.25, d))^2 * 10^(-P / 10)
-indoor exposure  = (R * M / max(0.25, d)) * 10^(-P / 10)
-severity         = clamp(exposure, 0, 1) * barrierTransmission
+outdoor exposure = (R / max(0.25, d))^2
+indoor exposure  = R * M / max(0.25, d)
+severity         = clamp(exposure, 0, 1) * max(0, 1 - P / 35) * barrierTransmission
 ```
+
+Protection takes its share in decibels: hearing after-effects grow roughly linearly with the level reaching the ear in dB, so 17.5 dB of ear cups halve the effect and 35 dB remove it. A close indoor grenade still delivers 140 dB and more through ordinary muffs, so a headset reduces the stun and keeps a wearer out of the severe phase rather than cancelling it.
+
+At full strength, blast hearing loss lowers everything by 18 dB and closes a one-pole low-pass towards 250 Hz; the severe phase, reached only without protection, lowers it by 27 dB towards 175 Hz. A dull, quiet low end remains while the highs disappear: at the severe peak about -28 dB at 100 Hz, -42 dB at 1 kHz and -54 dB at 4 kHz.
 
 The indoor branch requires both the explosion source and the listener to be indoors. A grenade inside a building does not grant the indoor multiplier to a player outside. These are relative gameplay exposure laws, not calibrated blast-pressure predictions; the indoor branch falls as inverse distance.
 

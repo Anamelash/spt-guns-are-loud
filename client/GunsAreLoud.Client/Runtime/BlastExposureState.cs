@@ -15,12 +15,20 @@ namespace GunsAreLoud.Client.Runtime
             internal float Start, Severity, HearingSeconds, RingingSeconds, SevereSeconds, AttackSeconds;
         }
         private readonly List<Event> _events = new List<Event>();
+        // Protection that removes all of the effect. Hearing after-effects grow
+        // roughly linearly with the level reaching the ear in dB, so a
+        // protector's dB take a proportional share of the effect. Dividing the
+        // energy instead let 17.5 dB of ear cups cut a close indoor grenade to
+        // about 2 % of its effect, although 140 dB and more still reach the ear.
+        internal const float FullProtectionDb = 35f;
+
         internal static float Severity(float distance, bool indoor, float radius, float indoorScale, float protectionDb)
         {
             if (float.IsNaN(distance) || float.IsInfinity(distance)) return 0;
             float ratio = Math.Max(0, radius) * (indoor ? Math.Max(1, indoorScale) : 1) / Math.Max(.25f, distance);
-            double exposure = (indoor ? ratio : ratio * ratio) * Math.Pow(10, -Math.Max(0, protectionDb) / 10);
-            return (float)Math.Min(1, Math.Max(0, exposure));
+            double exposure = Math.Min(1, Math.Max(0, indoor ? ratio : ratio * ratio));
+            double protection = float.IsNaN(protectionDb) ? 0 : Math.Max(0, protectionDb);
+            return (float)(exposure * Math.Max(0, 1 - protection / FullProtectionDb));
         }
         // Ringing at 100% explosion strength is anchored to the loudest ringing
         // gunfire can reach with the current settings. A fixed level let two

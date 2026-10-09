@@ -308,6 +308,175 @@ namespace GunsAreLoud.Tests
             Assert.That(route.VerifyActive(out _), Is.False);
         }
 
+        [Test]
+        public void CharacterControlsAreOwnedSnapshottedAndNeutralForPrototypeElectronics()
+        {
+            var store = new MixerStore();
+            var route = new TransactionalMixerHeadphoneRoute(store, 48000, ImmediateFitProvider.Instance);
+            Assert.That(HeadsetProfileRegistry.TryGet(Sordin, out HeadsetProfile profile), Is.True);
+            HeadsetProfile prototype = profile.WithElectronics(HeadphoneElectronicsGoldenTests.PrototypeElectronics());
+            Assert.That(route.TryActivate(prototype, HeadsetSendLevels.Neutral, out string reason), Is.True, reason);
+            Assert.That(TransactionalMixerHeadphoneRoute.CharacterParameters.Length, Is.EqualTo(7));
+            foreach (var parameter in TransactionalMixerHeadphoneRoute.CharacterParameters)
+                Assert.That(store.Values[parameter.Name], Is.EqualTo(parameter.Neutral), parameter.Name);
+            Assert.That(store.Values[TransactionalMixerHeadphoneRoute.ElectronicsBandOrder], Is.EqualTo(1f),
+                "the prototype keeps first-order band edges");
+            Assert.That(route.TryRestore(out _), Is.True);
+            foreach (var parameter in TransactionalMixerHeadphoneRoute.CharacterParameters)
+                Assert.That(store.Values[parameter.Name], Is.EqualTo(store.Original[parameter.Name]), parameter.Name);
+            Assert.That(store.Values[TransactionalMixerHeadphoneRoute.ElectronicsBandOrder],
+                Is.EqualTo(store.Original[TransactionalMixerHeadphoneRoute.ElectronicsBandOrder]));
+        }
+
+        [Test]
+        public void CharacterValuesReachTheMixerInNativeUnits()
+        {
+            var store = new MixerStore();
+            var route = new TransactionalMixerHeadphoneRoute(store, 48000, ImmediateFitProvider.Instance);
+            Assert.That(HeadsetProfileRegistry.TryGet(Sordin, out HeadsetProfile profile), Is.True);
+            HeadsetProfile coloured = profile.WithElectronics(Coloured(0.003f));
+            Assert.That(route.TryActivate(coloured, HeadsetSendLevels.Neutral, out string reason), Is.True, reason);
+            Assert.That(store.Values["GAL_ElectronicsLowShelfDb"], Is.EqualTo(-3f));
+            Assert.That(store.Values["GAL_ElectronicsLowShelfHz"], Is.EqualTo(150f));
+            Assert.That(store.Values["GAL_ElectronicsPresenceDb"], Is.EqualTo(3f));
+            Assert.That(store.Values["GAL_ElectronicsPresenceHz"], Is.EqualTo(2500f));
+            Assert.That(store.Values["GAL_ElectronicsNoiseDb"], Is.EqualTo(-64f));
+            Assert.That(store.Values["GAL_ElectronicsSaturation"], Is.EqualTo(0.4f));
+            Assert.That(store.Values["GAL_ElectronicsDelayMs"], Is.EqualTo(3f).Within(1e-5f));
+            Assert.That(store.Values["GAL_ElectronicsBandOrder"], Is.EqualTo(2f));
+            Assert.That(route.VerifyActive(out reason), Is.True, reason);
+        }
+
+        [Test]
+        public void ColouringAloneKeepsNativeStateWhileDelayOrDeviceRestartsIt()
+        {
+            var store = new MixerStore();
+            var route = new TransactionalMixerHeadphoneRoute(store, 48000, ImmediateFitProvider.Instance);
+            Assert.That(HeadsetProfileRegistry.TryGet(Sordin, out HeadsetProfile profile), Is.True);
+            Assert.That(route.TryActivate(profile.WithElectronics(Coloured(0f)), HeadsetSendLevels.Neutral, out _), Is.True);
+            float first = store.Values["GAL_ElectronicsReset"];
+            Assert.That(first, Is.GreaterThan(0f));
+
+            HeadsetElectronicsProfile stronger = Coloured(0f).WithCharacterScale(1.5f);
+            Assert.That(route.TryActivate(profile.WithElectronics(stronger), HeadsetSendLevels.Neutral, out _), Is.True);
+            Assert.That(store.Values["GAL_ElectronicsReset"], Is.EqualTo(first), "a slider step must not restart the detector");
+            Assert.That(store.Values["GAL_ElectronicsPresenceDb"], Is.EqualTo(4.5f));
+
+            Assert.That(route.TryActivate(profile.WithElectronics(Coloured(0.003f)), HeadsetSendLevels.Neutral, out _), Is.True);
+            Assert.That(store.Values["GAL_ElectronicsReset"], Is.EqualTo(first + 1), "a new delay line length restarts it");
+
+            HeadsetSendLevels variant = HeadsetSendLevels.From(WornComTac());
+            Assert.That(route.TryActivate(profile.WithElectronics(Coloured(0.003f)), variant, out _), Is.True);
+            Assert.That(store.Values["GAL_ElectronicsReset"], Is.EqualTo(first + 2), "another device restarts it");
+
+            Assert.That(route.TryRestore(out _), Is.True);
+            Assert.That(route.TryActivate(profile.WithElectronics(Coloured(0.003f)), variant, out _), Is.True);
+            Assert.That(store.Values["GAL_ElectronicsReset"], Is.EqualTo(first + 3), "activation after Vanilla always restarts it");
+        }
+
+        [Test]
+        public void DelayIsDiscreteWhileColouringIsSmoothed()
+        {
+            Assert.That(SmoothedMixerParameterStore.RequiresImmediateSet("GAL_ElectronicsDelayMs"), Is.True);
+            Assert.That(SmoothedMixerParameterStore.RequiresImmediateSet("GAL_ElectronicsBandOrder"), Is.True);
+            foreach (string name in new[] { "GAL_ElectronicsNoiseDb", "GAL_ElectronicsPresenceDb",
+                "GAL_ElectronicsLowShelfDb", "GAL_ElectronicsSaturation", "GAL_ElectronicsPresenceHz" })
+                Assert.That(SmoothedMixerParameterStore.RequiresImmediateSet(name), Is.False, name);
+        }
+
+        [Test]
+        public void ReapplyingTheWornTemplateKeepsASettledRealisticRoute()
+        {
+            object worn = new object(), other = new object();
+            var active = new HeadphoneRouteStatus(HeadphoneMode.Realistic, HeadphoneMode.Realistic,
+                Sordin, "sordin-pro-x-foam-family", HeadphoneRouteFallback.None, "complete two-path route active", 3);
+            Assert.That(HeadphoneRouteRuntime.KeepsActiveRoute(active, false, worn, worn, Sordin), Is.True,
+                "an inventory move re-applies the same template and must not drop the route");
+
+            Assert.That(HeadphoneRouteRuntime.KeepsActiveRoute(active, false, worn, other, Sordin), Is.False,
+                "a different template is a real change");
+            Assert.That(HeadphoneRouteRuntime.KeepsActiveRoute(active, false, worn, worn, ComTac), Is.False,
+                "the route must serve the template being applied");
+            Assert.That(HeadphoneRouteRuntime.KeepsActiveRoute(active, true, worn, worn, Sordin), Is.False,
+                "a route still in transition takes the full path");
+            Assert.That(HeadphoneRouteRuntime.KeepsActiveRoute(active, false, null, null, Sordin), Is.False);
+
+            var vanilla = new HeadphoneRouteStatus(HeadphoneMode.Vanilla, HeadphoneMode.Vanilla,
+                Sordin, "", HeadphoneRouteFallback.None, "native EFT route", 4);
+            Assert.That(HeadphoneRouteRuntime.KeepsActiveRoute(vanilla, false, worn, worn, Sordin), Is.False,
+                "Vanilla leaves every template update to EFT");
+            var fallback = new HeadphoneRouteStatus(HeadphoneMode.Realistic, HeadphoneMode.Realistic,
+                Sordin, "sordin-pro-x-foam-family", HeadphoneRouteFallback.MixerWriteFailed, "restore failed", 5);
+            Assert.That(HeadphoneRouteRuntime.KeepsActiveRoute(fallback, false, worn, worn, Sordin), Is.False);
+        }
+
+        [Test]
+        public void DriftReportsTheOwnedParameterSomethingElseChanged()
+        {
+            var store = new MixerStore();
+            var route = new TransactionalMixerHeadphoneRoute(store, 48000, ImmediateFitProvider.Instance);
+            Assert.That(route.TryFindDrift(out _, out _, out _), Is.False, "an inactive route owns nothing");
+            Assert.That(HeadsetProfileRegistry.TryGet(Sordin, out HeadsetProfile profile), Is.True);
+            Assert.That(route.TryActivate(profile, HeadsetSendLevels.Neutral, out _), Is.True);
+            Assert.That(route.TryFindDrift(out _, out _, out _), Is.False);
+
+            store.Values["EffectsReturnsGroupVolume"] = -7f;
+            Assert.That(route.TryFindDrift(out string name, out float expected, out float actual), Is.True);
+            Assert.That(name, Is.EqualTo("EffectsReturnsGroupVolume"));
+            Assert.That(expected, Is.EqualTo(0f));
+            Assert.That(actual, Is.EqualTo(-7f));
+            Assert.That(route.VerifyActive(out string reason), Is.False);
+            Assert.That(reason, Does.Contain("EffectsReturnsGroupVolume"));
+
+            int reset = (int)store.Values["GAL_ElectronicsReset"];
+            Assert.That(route.TryActivate(profile, HeadsetSendLevels.Neutral, out _), Is.True);
+            Assert.That(route.TryFindDrift(out _, out _, out _), Is.False, "re-applying puts the owned value back");
+            Assert.That(store.Values["GAL_ElectronicsReset"], Is.EqualTo(reset), "a repair keeps the native state");
+        }
+
+        [Test]
+        public void DriftIsCheckedOnlyOnASettledRealisticRouteOutsideTinnitus()
+        {
+            var active = new HeadphoneRouteStatus(HeadphoneMode.Realistic, HeadphoneMode.Realistic,
+                Sordin, "sordin-pro-x-foam-family", HeadphoneRouteFallback.None, "complete two-path route active", 1);
+            Assert.That(HeadphoneRouteRuntime.ShouldCheckDrift(active, false, false, false, 10f, 9f, false), Is.True);
+            Assert.That(HeadphoneRouteRuntime.ShouldCheckDrift(active, false, false, false, 10f, 11f, false), Is.False,
+                "at most once per interval");
+            Assert.That(HeadphoneRouteRuntime.ShouldCheckDrift(active, false, false, false, 10f, 11f, true), Is.True,
+                "a skipped native re-apply asks for a check at once");
+            Assert.That(HeadphoneRouteRuntime.ShouldCheckDrift(active, true, false, false, 10f, 9f, true), Is.False,
+                "EFT's tinnitus drives GunsVolume while it runs");
+            Assert.That(HeadphoneRouteRuntime.ShouldCheckDrift(active, false, true, false, 10f, 9f, true), Is.False);
+            Assert.That(HeadphoneRouteRuntime.ShouldCheckDrift(active, false, false, true, 10f, 9f, true), Is.False);
+            var vanilla = new HeadphoneRouteStatus(HeadphoneMode.Realistic, HeadphoneMode.Vanilla,
+                "", "", HeadphoneRouteFallback.NoHeadset, "no active headset", 2);
+            Assert.That(HeadphoneRouteRuntime.ShouldCheckDrift(vanilla, false, false, false, 10f, 9f, true), Is.False);
+        }
+
+        [Test]
+        public void NativeTemplatePatchBindsToTheGameSignature()
+        {
+            var method = typeof(EFT.ActiveHeadphones.ActiveHeadphonesController).GetMethod("ApplyTemplate");
+            Assert.That(method, Is.Not.Null);
+            var parameters = method.GetParameters();
+            Assert.That(parameters.Length, Is.EqualTo(1));
+            Assert.That(parameters[0].Name, Is.EqualTo("template"), "Harmony binds the prefix argument by this name");
+            Assert.That(parameters[0].ParameterType, Is.EqualTo(typeof(EFT.InventoryLogic.HeadphonesTemplate)));
+            Assert.That(typeof(EFT.ActiveHeadphones.ActiveHeadphonesController).GetProperty("CurrentTemplate"), Is.Not.Null);
+        }
+
+        private const string ComTac = "5645bcc04bdc2d363b8b4572";
+
+        private static HeadsetElectronicsProfile Coloured(float delaySeconds)
+        {
+            HeadsetElectronicsProfile p = HeadphoneElectronicsGoldenTests.PrototypeElectronics();
+            return new HeadsetElectronicsProfile(p.QuietGainDb, p.ThresholdDbFs, p.KneeDb, p.Ratio, p.AttackSeconds,
+                p.HoldSeconds, p.ReleaseSeconds, p.OutputCeiling, p.MicHighpassHz, p.MicLowpassHz, p.StereoLinked,
+                p.DynamicsEvidence, p.ResponseEvidence,
+                new HeadsetElectronicsCharacter(-3f, 150f, 3f, 2500f, -64f, 0.4f, delaySeconds), HeadsetEvidence.Proposed,
+                null, 2);
+        }
+
         private sealed class Backend : IHeadphoneRouteBackend
         {
             internal int Activations, Restores;

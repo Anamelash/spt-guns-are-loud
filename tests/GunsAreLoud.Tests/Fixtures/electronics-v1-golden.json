@@ -1,0 +1,9 @@
+{
+  "rate": 48000,
+  "renders": [
+    { "signal": "impulse", "sha256": "0949e0e7bc4081cba1b0bbfcf6ac5b2de53dc2fea130a6768e5fa9404ffcdef2", "rms": 0.0028352555030258168 },
+    { "signal": "sine1k-20dBFS", "sha256": "11d02c8fcc1c68889a43fd14df0dd8f56c4774d7380dadce1b4b42a5f8729012", "rms": 0.091849394602361661 },
+    { "signal": "pink-12dBFS", "sha256": "486b70390e7d588096e324e32bc7c19bf18407ac5c2ab730a31167a582b8a1a7", "rms": 0.0353208938810624 },
+    { "signal": "silence", "sha256": "fec9afb531a8e036eba1d81651896e1b2c1f78b0234dbadc8e7549563f09407b", "rms": 0 }
+  ]
+}
