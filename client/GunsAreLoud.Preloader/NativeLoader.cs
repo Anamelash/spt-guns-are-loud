@@ -26,7 +26,7 @@ public static class NativeLoader
             string player = Path.Combine(Paths.GameRootPath, "UnityPlayer.dll");
             if (Hash(player) != "BF491512C0122395C4BA0316B936F22CB2D586BBF320C9417904DAC3C07CC9BE") throw new Exception("Unsupported UnityPlayer hash");
             string dll = Path.Combine(Path.GetDirectoryName(typeof(NativeLoader).Assembly.Location), "AudioPluginGalHeadphones.dll");
-            if (Hash(dll) != "7D80CC6E817E2D0D9D31724596BB4FE9AF3AE07E65E8BBDE1F8B10FBBC9324C8") throw new Exception("Unsupported DSP hash");
+            if (Hash(dll) != "A86909470D269779D6101FA653D5C01EE5D0CB9771ABD642AE3E6C0567B0E30D") throw new Exception("Unsupported DSP hash");
             IntPtr unity = GetModuleHandleW("UnityPlayer.dll");
             if (unity == IntPtr.Zero) throw new Exception("UnityPlayer not loaded");
 

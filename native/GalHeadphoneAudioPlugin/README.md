@@ -26,10 +26,38 @@ for bit.
 `Wet=0` is an exact, state-neutral bypass. Reset clears the filters, delay line
 and noise generators. The threshold is dBFS prototype data, not physical SPL.
 
-The build is reproducible from the repository path; `build.ps1` prints the
-artifact's SHA-256, which the preloader and `build/package.ps1` pin.
+## Building
 
-Run `./build.ps1`. The build fetches Unity Technologies' official `NativeAudioPlugins` repository and compiles against `NativeCode/AudioPluginInterface.h`; the tested SDK revision was `bc7893edbba4c8a592777e590e34f21a11d762b4`.
+Run `./build.ps1`. It fetches Unity Technologies' official `NativeAudioPlugins`
+repository at the pinned revision `bc7893edbba4c8a592777e590e34f21a11d762b4`,
+compiles against `NativeCode/AudioPluginInterface.h`, runs the DSP and
+registration tests and prints the artifact's SHA-256. The preloader
+(`client/GunsAreLoud.Preloader/NativeLoader.cs`), `build/package.ps1` and
+`build/headphones/install-native-plugin.ps1` pin that hash; update all three
+whenever the DLL changes.
+
+The build is reproducible byte for byte from any directory:
+
+- Toolchain: WinLibs GCC 16.1.0 with MinGW-w64 14.0.0 (UCRT, POSIX threads),
+  release r4: `winget install BrechtSanders.WinLibs.POSIX.UCRT --version 16.1.0-14.0.0-r4`.
+  The script checks `g++ --version` and refuses any other build; a different
+  GCC produces a different binary.
+- The GCC runtime is linked statically (`-static`), so the DLL needs no
+  redistributable runtime. Its imports of thread, TLS and memory-protection
+  functions come from that runtime (winpthreads, libgcc, the MinGW start-up
+  code), not from the plugin, which makes no Windows API calls of its own.
+- The PE timestamp comes from the `$sourceDateEpoch` constant in `build.ps1`
+  (passed to the linker as `SOURCE_DATE_EPOCH`) rather than from the build
+  time, and the image base is fixed at `0x180000000` rather than derived from
+  the output path. Keep the timestamp non-zero: a zero timestamp makes the DLL
+  trip generic antivirus heuristics. Bump the constant when the DSP sources
+  change.
+- `src/version.rc` gives the DLL a version resource. Its file version follows
+  the plugin ABI, not the mod release, because the DLL changes only when the
+  DSP does.
+- The DLL is linked with the Windows GUI subsystem, and the output must be
+  named `AudioPluginGalHeadphones.dll`: the name is written into the export
+  table.
 
 Unity registration uses the documented `UnityGetAudioEffectDefinitions` export.
 The DLL must be available to Unity's native plug-in importer/player before a

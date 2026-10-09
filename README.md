@@ -8,7 +8,7 @@
 
 The mod builds on EFT's original weapon recordings. Active headsets protect your hearing and change how you hear the world: each model has its own isolation, amplification, sound and response to loud events.
 
-**Version:** 1.1.0
+**Version:** 1.1.1
 
 **Supported game:** SPT 4.1.5 on Windows x64
 

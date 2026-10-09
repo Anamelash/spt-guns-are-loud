@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <GunsAreLoudVersion>1.1.0</GunsAreLoudVersion>
+    <GunsAreLoudVersion>1.1.1</GunsAreLoudVersion>
     <Version>$(GunsAreLoudVersion)</Version>
     <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>

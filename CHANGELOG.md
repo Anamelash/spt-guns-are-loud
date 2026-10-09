@@ -1,5 +1,10 @@
 # Changes from vanilla
 
+## 1.1.1 - antivirus false positive
+
+- Nothing changes in the sound. The headset electronics file in 1.1.0 was flagged as a trojan by BitDefender and by the scanners built on its engine (Emsisoft, GData, eScan, VIPRE, ALYac, Arcabit), and Nexus Mods quarantined the archive on that verdict. The file is a Unity audio effect, and the detection was a generic heuristic reacting to the way the file was built rather than to anything it does. 1.1.1 ships it built differently, and that build no longer trips the heuristic.
+- All three files in the archive change in this version. Replace all of them: a mixed installation keeps the headset on Vanilla.
+
 ## 1.1.0 - headset electronics and grenades
 
 - In Realistic, an active headset no longer sounds like perfectly clear open ears. Its electronics now carry the character of the real device: the band its microphones pass, with steep edges, a lift in the presence region around 3 kHz and a little less low end, a faint hiss in a quiet room that disappears under ambience and gunfire, and loud sounds rounded off into the limit instead of cut flat. A premium digital Sordin, ComTac V or VI or Ops-Core is the cleanest and quietest. Consumer models such as the Walker's Razor or Earmor M32 amplify more, hiss more and react slower, so the first crack of a shot gets through before they clamp; the analog GSSh-01 and ComTac II react slowly too, and the GSSh-01 has the narrow 300-7000 Hz band of its own specification.
