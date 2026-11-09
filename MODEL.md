@@ -1,4 +1,4 @@
-# Guns Are Loud: Physical and Perceptual Model
+﻿# Guns Are Loud: Physical and Perceptual Model
 
 ## Purpose
 
@@ -134,7 +134,7 @@ At the calibrated 12 dB, the ordinary correction is limited to ±12 dB. Larger v
 
 The decay is conservative. A quiet decay may recover by at most 6 dB relative to an attenuated body and never above its native level. A strong decay keeps the body correction. If the body already requires gain above unity, the decay receives no additional recovery. Playback holds the body coefficient through the first 180 ms or the actual automatic body boundary, whichever is later, then moves to the decay coefficient over 30 ms.
 
-Normalization excludes user copy gain, fade, suppressor attenuation, headset processing, and occlusion.
+Normalization excludes user copy gain, fade, the direct level correction, headset processing, and occlusion.
 
 ### Cartridge weight and copy level
 
@@ -191,7 +191,7 @@ L   = L_E + L_d + L_m
 - **Reference.** 1800 J is an intermediate rifle cartridge: 5.45×39, 5.56×45 and 7.62×39 rounds sit at 1.7–2.2 kJ, so their `L_E` is close to 0 dB.
 - **Distance.** `d` is measured on every shot from the weapon's muzzle to the listener. Spherical spreading makes the blast 6 dB louder per halving of that distance. A held muzzle is never closer than a compact pistol held up to the face (0.3 m), and beyond 2 m the listener is not where the shooter is (a free camera or spectator view), so the term is held at those bounds.
 - **Fallback.** A round without mass or velocity gets the single fallback `L_E = 0`, the reference cartridge.
-- **Muzzle devices.** The game rates every muzzle device with one number, `Loudness`: suppressors from −12 (a short moderator) to −39 (an integral suppressor), with most cans at −20 to −30; flash hiders 0; compensators and brakes +5 to +40. The game itself uses the number only for what the AI hears; the player's own suppressed shot plays a separate recording that is on average only 2.5 dB quieter than the unsuppressed one, whatever the device. Here the sum of the devices' numbers enters the level, so a big can and a moderator differ and a brake raises the shot. `k` is `Muzzle Device Influence, dB` (Gunshots, 0.4 by default, 0–1) divided by the 0.5 dB per dB slope of the target below: the setting is the audible change per point, the index carries twice that. At the default a −25 suppressor stands 20 dB lower on the scale, which the target renders as 10 dB at the ear, close to the 20–35 dB such a device takes off the muzzle blast and well below the 6 dB a fixed suppressed flag used to give every device. A brake at +10 adds 8 dB to the index, 4 dB at the ear until the top of the scale. The hearing dose below follows the same level, so a suppressed pistol-caliber or intermediate shot leaves no dose and a brake adds to it. 0 ignores the devices.
+- **Muzzle devices.** The game rates every muzzle device with one number, `Loudness`: suppressors from −12 (a short moderator) to −39 (an integral suppressor), with most cans at −20 to −30; flash hiders 0; compensators and brakes +5 to +40. The game itself uses the number only for what the AI hears; the player's own suppressed shot plays a separate recording that is on average only 2.5 dB quieter than the unsuppressed one, whatever the device. Here the sum of the devices' numbers enters the level, so a big can and a moderator differ and a brake raises the shot. `k` is `Muzzle Device Influence, dB` (Gunshots, 0.4 by default, 0–1) divided by the 0.5 dB per dB slope of the target below: the setting is the audible change per point, the index carries twice that. At the default a −25 suppressor stands 20 dB lower on the scale, which the target renders as 10 dB at the ear, close to the 20–35 dB such a device takes off the muzzle blast. A brake at +10 adds 8 dB to the index, 4 dB at the ear until the top of the scale. The hearing dose below follows the same level, so a suppressed pistol-caliber or intermediate shot leaves no dose and a brake adds to it. 0 ignores the devices.
 
 A cartridge added by another mod therefore needs no table entry: it is placed by what it fires. A .700 Nitro Express lands next to the 12.7 mm rounds, a mod's pistol round next to the game's pistols.
 
