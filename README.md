@@ -10,7 +10,7 @@ The mod builds on EFT's original weapon recordings. Active headsets protect your
 
 **Version:** 1.2.0
 
-**Supported game:** SPT 4.1.5 on Windows x64
+**Supported game:** SPT 4.1.\*
 
 [Download](https://github.com/Anamelash/spt-guns-are-loud/releases/latest) · [All releases](https://github.com/Anamelash/spt-guns-are-loud/releases) · [Discord](https://discord.gg/w2DpURxtrf) · [GitHub Issues](https://github.com/Anamelash/spt-guns-are-loud/issues)
 
