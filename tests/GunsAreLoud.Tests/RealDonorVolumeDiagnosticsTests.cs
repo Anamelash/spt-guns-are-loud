@@ -64,7 +64,7 @@ namespace GunsAreLoud.Tests
                 LowEndNormalizationCache.Clear();
                 int id = rows.IndexOf(row) + 1;
                 LowEndNormalizationCache.Register(id, row.Item2.Rate, row.Item2.Samples, 1f, group, row.Item3);
-                LowEndNormalizationCache.Refresh(_config.GetTuning());
+                LowEndNormalizationCache.CompletePending(_config.GetTuning());
                 LowEndNormalizationResult production = LowEndNormalizationCache.Evaluate(id, AudioTuning());
                 float body = production.BodyGain, decay = production.DecayGain;
                 float peak = 0;

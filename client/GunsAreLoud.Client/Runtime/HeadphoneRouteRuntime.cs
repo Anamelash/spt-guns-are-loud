@@ -9,6 +9,7 @@ using EFT.GlobalEvents;
 using EFT.InventoryLogic;
 using GunsAreLoud.Client.Audio;
 using GunsAreLoud.Client.Configuration;
+using GunsAreLoud.Client.Engine;
 using HarmonyLib;
 using UnityEngine;
 using UnityEngine.Audio;
@@ -66,10 +67,18 @@ namespace GunsAreLoud.Client.Runtime
             // Recording every owned parameter on both sides of a change is what
             // makes that difference readable instead of guessed at.
             _config.Source.SettingChanged += OnAnySettingChanged;
+            SoundEngine.Mixer.SettingsChanged += OnHostSettingsChanged;
             HeadphoneNativeEqCache.PreloadAll(AudioSettings.outputSampleRate);
         }
 
         private void OnModeChanged(object sender, EventArgs args) { _dirty = true; }
+
+        // A mixer host's own trim (SEB's "Ambience") is part of the level a
+        // Realistic route owns. An unchanged headset would skip reactivation, so
+        // the new trim is forced through.
+        private bool _forceRefresh;
+
+        private void OnHostSettingsChanged() { _forceRefresh = true; _dirty = true; }
 
         private void OnAnySettingChanged(object sender, SettingChangedEventArgs args)
         {
@@ -125,7 +134,8 @@ namespace GunsAreLoud.Client.Runtime
             }
             if (!_dirty && Time.unscaledTime < _nextPoll) return;
             _nextPoll = Time.unscaledTime + 0.2f;
-            Refresh(_nativeUpdate);
+            Refresh(_nativeUpdate || _forceRefresh);
+            _forceRefresh = false;
             _nativeUpdate = false;
             _dirty = false;
         }
@@ -146,8 +156,14 @@ namespace GunsAreLoud.Client.Runtime
                 _smoothStore = HeadphoneMixerAsset.Owns(mixer) && mixer != null
                     ? new SmoothedMixerParameterStore(mixer)
                     : null;
-                _backend = _smoothStore != null ? new TransactionalMixerHeadphoneRoute(_smoothStore, sampleRate) : null;
-                _controller = new HeadphoneRouteController(_backend);
+                _backend = _smoothStore != null
+                    ? new TransactionalMixerHeadphoneRoute(_smoothStore, sampleRate,
+                        HeadphoneMixerAsset.HostVariantActive ? HeadphoneRouteOverrides.ForHost(SoundEngine.Mixer) : null)
+                    : null;
+                _controller = _backend == null && HeadphoneMixerAsset.IsForeignMaster(mixer)
+                    ? new HeadphoneRouteController(null, HeadphoneRouteFallback.ForeignMasterMixer,
+                        "master mixer replaced by " + ForeignMixerOwner())
+                    : new HeadphoneRouteController(_backend);
                 force = true;
             }
 
@@ -164,6 +180,13 @@ namespace GunsAreLoud.Client.Runtime
             RepairDrift(requested, templateId, sends, character);
             LogStatus(_controller.Status, sends, character);
         }
+
+        /// <summary>Who replaced the master mixer, as far as this mod can tell.</summary>
+        internal static string ForeignMixerOwner() =>
+            HeadphoneMixerAsset.YieldedTo ??
+            (SoundEngine.Mixer.IsActive ? SoundEngine.Mixer.DisplayName : UnknownMixerOwner);
+
+        internal const string UnknownMixerOwner = "another mod";
 
         internal const float DriftCheckIntervalSeconds = 1f;
         private float _nextDriftCheck;
@@ -360,6 +383,7 @@ namespace GunsAreLoud.Client.Runtime
                 _config.Enabled.SettingChanged -= OnModeChanged;
                 _config.HearThroughCharacter.SettingChanged -= OnModeChanged;
                 _config.Source.SettingChanged -= OnAnySettingChanged;
+            SoundEngine.Mixer.SettingsChanged -= OnHostSettingsChanged;
             }
             _controller?.RestoreForShutdown();
             _smoothStore?.Flush();

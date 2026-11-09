@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using GunsAreLoud.Client.Configuration;
 using GunsAreLoud.Client.Runtime;
@@ -27,6 +27,14 @@ namespace GunsAreLoud.Client.Audio
         internal readonly float Rms160To315;
         internal readonly float Rms315To2000;
         internal readonly float RmsTotal;
+        /// <summary>K-weighted level of the window (BS.1770, summed channels), dB.</summary>
+        internal readonly float KWeightedDb;
+        /// <summary>K-weighted level of the attack (the first 50 ms of the window), dB.</summary>
+        internal readonly float KAttackDb;
+        /// <summary>The same two levels and the sample peak as they leave the output limiter, the window one lookahead later.</summary>
+        internal readonly float PostKWeightedDb;
+        internal readonly float PostKAttackDb;
+        internal readonly float PostSamplePeak;
         internal readonly float PreClampSamplePeak;
         internal readonly float PostClampSamplePeak;
         internal readonly int PreClampOverCount;
@@ -39,6 +47,8 @@ namespace GunsAreLoud.Client.Audio
         internal readonly ListenerProbeChannelScope ChannelScope;
         internal readonly bool FilterStateResetAtWindowBout;
         internal readonly bool IncludesInitialFilterTransient;
+        /// <summary>Frames the probe let pass before its window opened: the sound's flight time for an explosion, 0 for a shot.</summary>
+        internal readonly int DelayFrames;
 
         internal ListenerBandTelemetry(
             int probeId,
@@ -56,8 +66,20 @@ namespace GunsAreLoud.Client.Audio
             int postClampOverCount,
             int nonFiniteCount,
             int channelsMeasured,
-            DiagnosticShotToken diagnosticShot)
+            DiagnosticShotToken diagnosticShot,
+            float kWeightedDb = float.NaN,
+            float kAttackDb = float.NaN,
+            float postKWeightedDb = float.NaN,
+            float postKAttackDb = float.NaN,
+            float postSamplePeak = float.NaN,
+            int delayFrames = 0)
         {
+            DelayFrames = delayFrames;
+            KWeightedDb = kWeightedDb;
+            KAttackDb = kAttackDb;
+            PostKWeightedDb = postKWeightedDb;
+            PostKAttackDb = postKAttackDb;
+            PostSamplePeak = postSamplePeak;
             ProbeId = probeId;
             Route = route;
             AutomaticBank = automaticBank;
@@ -108,6 +130,8 @@ namespace GunsAreLoud.Client.Audio
         private HearingDspChannelState _leftState;
         private HearingDspChannelState _rightState;
         private MasterLimiterState _limiter;
+        // 1: the output limiter runs as the program limiter (shot density on).
+        private volatile int _programLimiter;
         private double _phaseLeft;
         private double _phaseRight;
         private int _nextProbeId;
@@ -127,6 +151,19 @@ namespace GunsAreLoud.Client.Audio
         private float _probeLp315Right;
         private float _probeLp2000Left;
         private float _probeLp2000Right;
+        // The K-weighting of the listener probe, recomputed only when the rate changes.
+        private KWeightingCoefficients _probeK;
+        private KWeightingChannel _probeKLeft;
+        private KWeightingChannel _probeKRight;
+        // The same weighting after the output limiter.
+        private KWeightingChannel _probeKPostLeft;
+        private KWeightingChannel _probeKPostRight;
+
+        /// <summary>Program limiter (shot density) on or off; applied on the next audio buffer.</summary>
+        internal void SetProgramLimiter(bool program)
+        {
+            _programLimiter = program ? 1 : 0;
+        }
 
         internal void SetTargets(
             bool enabled,
@@ -170,11 +207,17 @@ namespace GunsAreLoud.Client.Audio
             Interlocked.Increment(ref _bypassGeneration);
         }
 
+        /// <summary>
+        /// Arms a listener probe. <paramref name="delayFrames"/> frames pass
+        /// before its window opens, at both stages: an explosion's window
+        /// starts when its sound arrives, not when it is thrown.
+        /// </summary>
         internal int ArmMasterProbe(
             AutomaticPitchedRoute route,
             bool automaticBank,
             int outputSampleRate,
-            DiagnosticShotToken diagnosticShot = default)
+            DiagnosticShotToken diagnosticShot = default,
+            int delayFrames = 0)
         {
             EnsureMasterProbes();
             ProbeSet probeSet = Volatile.Read(ref _probeSet);
@@ -182,6 +225,7 @@ namespace GunsAreLoud.Client.Audio
             int targetFrames = Mathf.Max(
                 1,
                 Mathf.RoundToInt(Mathf.Max(8000, outputSampleRate) * DiagnosticWindowSeconds));
+            int attackFrames = DirectLevelMeter.WindowFrames(Mathf.Max(8000, outputSampleRate));
             for (int index = 0; index < probeSet.Probes.Length; index++)
             {
                 MasterProbe probe = probeSet.Probes[index];
@@ -190,7 +234,7 @@ namespace GunsAreLoud.Client.Audio
                     continue;
                 }
 
-                probe.Reset(probeId, route, automaticBank, targetFrames, diagnosticShot);
+                probe.Reset(probeId, route, automaticBank, targetFrames, diagnosticShot, attackFrames, Math.Max(0, delayFrames));
                 if (Interlocked.Increment(ref probeSet.ActiveCount) == 1)
                 {
                     Interlocked.Increment(ref _probeResetGeneration);
@@ -230,7 +274,13 @@ namespace GunsAreLoud.Client.Audio
                     probe.PeakWindow.Measurement.PostClampOverCount,
                     probe.PeakWindow.Measurement.NonFiniteCount,
                     probe.ChannelsMeasured,
-                    probe.DiagnosticShot);
+                    probe.DiagnosticShot,
+                    DirectLevelMeter.Level(probe.SumK, frames),
+                    DirectLevelMeter.Level(probe.SumKAttack, Math.Max(1, probe.AttackFrames)),
+                    DirectLevelMeter.Level(probe.SumKPost, Math.Max(1, probe.PostFrames)),
+                    DirectLevelMeter.Level(probe.SumKPostAttack, Math.Max(1, Math.Min(probe.AttackFrames, probe.PostFrames))),
+                    probe.PostPeak,
+                    probe.DelayFrames);
                 Volatile.Write(ref probe.State, 0);
                 return true;
             }
@@ -294,6 +344,7 @@ namespace GunsAreLoud.Client.Audio
             }
 
             int sampleRate = Math.Max(8000, _targetSampleRate);
+            _limiter.SetProgram(_programLimiter != 0);
             int bypassGeneration = Volatile.Read(ref _bypassGeneration);
             // The limiter carries gain between buffers, so it is reset by the
             // generation and the layout only — never on the ordinary "no hearing
@@ -352,6 +403,7 @@ namespace GunsAreLoud.Client.Audio
             float probeAlpha160 = probesArmed ? HearingDspTransfer.CutoffToAlpha(160f, sampleRate) : 0f;
             float probeAlpha315 = probesArmed ? HearingDspTransfer.CutoffToAlpha(315f, sampleRate) : 0f;
             float probeAlpha2000 = probesArmed ? HearingDspTransfer.CutoffToAlpha(2000f, sampleRate) : 0f;
+            if (probesArmed && _probeK.Rate != sampleRate) _probeK = KWeightingCoefficients.For(sampleRate);
 
             // The ringing tone is a sine at a fixed step. Advancing it by the
             // two-term recurrence removes two transcendentals per frame, and when
@@ -401,7 +453,45 @@ namespace GunsAreLoud.Client.Audio
             // the diagnostics keep reporting what actually arrived, and only the
             // buffer that leaves for the output is bounded.
             RunMasterLimiter(data, channels, sampleRate);
+            if (probesArmed) AccumulatePostStage(probeSet, data, channels);
             AudioFilterTrace.Record(AudioFilterKind.Hearing, trace, data.Length, channels);
+        }
+
+        /// <summary>
+        /// What leaves the limiter, for every armed probe: the same K-weighted
+        /// levels and the sample peak, over the probe's own window. Then the
+        /// probes whose window closed in this buffer are handed to the main thread.
+        /// </summary>
+        private void AccumulatePostStage(ProbeSet probeSet, float[] data, int channels)
+        {
+            for (int frame = 0; frame < data.Length; frame += channels)
+            {
+                float left = data[frame];
+                float right = channels > 1 ? data[frame + 1] : left;
+                if (!IsFinite(left)) left = 0f;
+                if (!IsFinite(right)) right = 0f;
+                double kLeft = _probeKPostLeft.Process(left, ref _probeK);
+                double kRight = _probeKPostRight.Process(right, ref _probeK);
+                double kEnergy = kLeft * kLeft + kRight * kRight;
+                float magnitude = Math.Max(Math.Abs(left), Math.Abs(right));
+                for (int index = 0; index < probeSet.Probes.Length; index++)
+                {
+                    MasterProbe probe = probeSet.Probes[index];
+                    if (Volatile.Read(ref probe.State) != 1 || probe.PostFrames >= probe.PeakWindow.TargetFrames) continue;
+                    if (probe.PostDelay > 0) { probe.PostDelay--; continue; }
+                    probe.SumKPost += kEnergy;
+                    if (probe.PostFrames < probe.AttackFrames) probe.SumKPostAttack += kEnergy;
+                    if (magnitude > probe.PostPeak) probe.PostPeak = magnitude;
+                    probe.PostFrames++;
+                }
+            }
+            for (int index = 0; index < probeSet.Probes.Length; index++)
+            {
+                MasterProbe probe = probeSet.Probes[index];
+                if (Volatile.Read(ref probe.State) != 1 || !probe.PeakWindow.Complete) continue;
+                if (Interlocked.CompareExchange(ref probe.State, 2, 1) == 1)
+                    Interlocked.Decrement(ref probeSet.ActiveCount);
+            }
         }
 
         private int RunMasterLimiter(float[] data, int channels, int sampleRate)
@@ -458,19 +548,27 @@ namespace GunsAreLoud.Client.Audio
             double energy160To315 = StereoEnergy(band160To315Left, band160To315Right);
             double energy315To2000 = StereoEnergy(band315To2000Left, band315To2000Right);
             double totalEnergy = StereoEnergy(diagnosticLeft, diagnosticRight);
+            double kLeft = _probeKLeft.Process(diagnosticLeft, ref _probeK);
+            double kRight = _probeKRight.Process(diagnosticRight, ref _probeK);
+            double kEnergy = kLeft * kLeft + kRight * kRight;
             for (int index = 0; index < probeSet.Probes.Length; index++)
             {
                 MasterProbe probe = probeSet.Probes[index];
-                if (Volatile.Read(ref probe.State) != 1)
+                // A probe whose window closed earlier in this buffer waits for the
+                // post-stage pass to be handed over; it takes no more frames.
+                if (Volatile.Read(ref probe.State) != 1 || probe.PeakWindow.Complete)
                 {
                     continue;
                 }
+                if (probe.Delay > 0) { probe.Delay--; continue; }
 
                 probe.Sum20To80 += energy20To80;
                 probe.Sum80To160 += energy80To160;
                 probe.Sum160To315 += energy160To315;
                 probe.Sum315To2000 += energy315To2000;
                 probe.SumTotal += totalEnergy;
+                probe.SumK += kEnergy;
+                if (probe.PeakWindow.Frames < probe.AttackFrames) probe.SumKAttack += kEnergy;
                 int channelsMeasured = Math.Min(channels, 2);
                 probe.ChannelsMeasured = Math.Max(probe.ChannelsMeasured, channelsMeasured);
                 probe.PeakWindow.AddFrame(
@@ -479,11 +577,6 @@ namespace GunsAreLoud.Client.Audio
                     preClampRight,
                     right,
                     channelsMeasured);
-                if (probe.PeakWindow.Complete)
-                {
-                    if (Interlocked.CompareExchange(ref probe.State, 2, 1) == 1)
-                        Interlocked.Decrement(ref probeSet.ActiveCount);
-                }
             }
         }
 
@@ -554,6 +647,10 @@ namespace GunsAreLoud.Client.Audio
             _probeLp160Left = _probeLp160Right = 0f;
             _probeLp315Left = _probeLp315Right = 0f;
             _probeLp2000Left = _probeLp2000Right = 0f;
+            _probeKLeft.Reset();
+            _probeKRight.Reset();
+            _probeKPostLeft.Reset();
+            _probeKPostRight.Reset();
         }
 
         private void ConsumeProbeResetGeneration()
@@ -605,6 +702,18 @@ namespace GunsAreLoud.Client.Audio
             internal double Sum160To315;
             internal double Sum315To2000;
             internal double SumTotal;
+            internal double SumK;
+            internal double SumKAttack;
+            internal double SumKPost;
+            internal double SumKPostAttack;
+            internal float PostPeak;
+            internal int PostFrames;
+            internal int AttackFrames;
+            // Frames still to pass before the window opens, at each stage, and
+            // what they were armed with.
+            internal int Delay;
+            internal int PostDelay;
+            internal int DelayFrames;
             internal AudioPeakWindow PeakWindow;
             internal int ChannelsMeasured;
             internal DiagnosticShotToken DiagnosticShot;
@@ -614,12 +723,21 @@ namespace GunsAreLoud.Client.Audio
                 AutomaticPitchedRoute route,
                 bool automaticBank,
                 int targetFrames,
-                DiagnosticShotToken diagnosticShot)
+                DiagnosticShotToken diagnosticShot,
+                int attackFrames = 0,
+                int delayFrames = 0)
             {
                 ProbeId = probeId;
                 Route = route;
                 AutomaticBank = automaticBank;
                 DiagnosticShot = diagnosticShot;
+                AttackFrames = attackFrames;
+                Delay = PostDelay = DelayFrames = delayFrames;
+                SumKAttack = 0.0;
+                SumKPost = 0.0;
+                SumKPostAttack = 0.0;
+                PostPeak = 0f;
+                PostFrames = 0;
                 PeakWindow.Reset(targetFrames);
                 ChannelsMeasured = 0;
                 Sum20To80 = 0.0;
@@ -627,6 +745,7 @@ namespace GunsAreLoud.Client.Audio
                 Sum160To315 = 0.0;
                 Sum315To2000 = 0.0;
                 SumTotal = 0.0;
+                SumK = 0.0;
             }
         }
     }

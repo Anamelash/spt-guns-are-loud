@@ -41,7 +41,13 @@ namespace GunsAreLoud.Client.Audio
         internal float CurrentDb => _currentDb;
         internal bool Ramping => _elapsed < RampSeconds;
 
-        internal static bool TryCreate(AudioMixer mixer, out GunshotContrastMixerRouter router, out string failure)
+        internal static bool TryCreate(AudioMixer mixer, out GunshotContrastMixerRouter router, out string failure) =>
+            TryCreate(mixer, GunshotContrastMixerRouteTable.Routes, out router, out failure);
+
+        /// <param name="routes">The route table of the mixer variant: the stock one, or
+        /// the one built on Sound Engine Backport's live mixer.</param>
+        internal static bool TryCreate(AudioMixer mixer, ContrastRouteSpec[] routes,
+            out GunshotContrastMixerRouter router, out string failure)
         {
             router = null;
             failure = null;
@@ -53,7 +59,7 @@ namespace GunsAreLoud.Client.Audio
                 // The stock graph contains both Occlusion and Occlusion/Occlusion.
                 // Resolve the deeper path first, then remove it from the parent's
                 // suffix matches instead of trusting group-name uniqueness.
-                foreach (ContrastRouteSpec spec in GunshotContrastMixerRouteTable.Routes
+                foreach (ContrastRouteSpec spec in routes
                     .OrderByDescending(value => value.ParentPath.Length))
                 {
                     AudioMixerGroup[] originals = mixer.FindMatchingGroups(spec.ParentPath)
@@ -70,7 +76,7 @@ namespace GunsAreLoud.Client.Audio
                     claimedOriginals.Add(originals[0]);
                     resolved.Add(new Route { Spec = spec, Original = originals[0], Input = inputs[0] });
                 }
-                if (resolved.Count != GunshotContrastMixerRouteTable.Routes.Length)
+                if (resolved.Count != routes.Length)
                     throw new InvalidOperationException("contrast route table is incomplete");
                 router = new GunshotContrastMixerRouter(mixer, resolved.ToArray());
                 return true;

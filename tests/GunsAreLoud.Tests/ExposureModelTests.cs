@@ -99,19 +99,38 @@ namespace GunsAreLoud.Tests
         }
 
         [Test]
-        public void SuppressorAndHeadphonesReduceButDoNotEraseDose()
+        public void ASuppressorTakesTheDoseDownTheLevelLineAndACanRemovesIt()
         {
-            ShotDescriptor unprotected = CreateShot();
+            // The suppressed flag alone changes nothing: the device's rating does.
+            ShotDescriptor flagged = CreateShot();
+            flagged.IsSuppressed = true;
+            Assert.That(ExposureModel.Calculate(flagged, _tuning).FinalSeverity,
+                Is.EqualTo(ExposureModel.Calculate(CreateShot(), _tuning).FinalSeverity));
+
+            // A -12 moderator on the 5.45 leaves a fraction; a -25 can puts the
+            // shot under the 140 dB line and leaves no dose; headphones reduce further.
+            ShotDescriptor moderated = CreateShot();
+            moderated.IsSuppressed = true;
+            moderated.SummedModLoudness = -12;
+            ShotDescriptor canned = CreateShot();
+            canned.IsSuppressed = true;
+            canned.SummedModLoudness = -25;
             ShotDescriptor protectedShot = CreateShot();
-            protectedShot.IsSuppressed = true;
+            protectedShot.SummedModLoudness = -12;
             protectedShot.HasActiveHeadphones = true;
             protectedShot.HeadphonesCompressorThresholdDb = -23f;
 
-            ExposureResult open = ExposureModel.Calculate(unprotected, _tuning);
+            ExposureResult open = ExposureModel.Calculate(CreateShot(), _tuning);
+            ExposureResult moderate = ExposureModel.Calculate(moderated, _tuning);
+            ExposureResult can = ExposureModel.Calculate(canned, _tuning);
             ExposureResult protectedResult = ExposureModel.Calculate(protectedShot, _tuning);
 
-            Assert.That(protectedResult.FinalSeverity, Is.GreaterThan(0f));
-            Assert.That(protectedResult.FinalSeverity, Is.LessThan(open.FinalSeverity));
+            Assert.That(moderate.DeviceIndex, Is.EqualTo(-12f * ModConfig.DefaultMuzzleDeviceDb / DirectLevelModel.SlopePerDb).Within(1e-4f));
+            Assert.That(moderate.LevelIndex, Is.EqualTo(open.LevelIndex + moderate.DeviceIndex).Within(1e-4f));
+            Assert.That(moderate.FinalSeverity, Is.GreaterThan(0f));
+            Assert.That(moderate.FinalSeverity, Is.LessThan(open.FinalSeverity * 0.3f));
+            Assert.That(can.FinalSeverity, Is.Zero);
+            Assert.That(protectedResult.FinalSeverity, Is.LessThan(moderate.FinalSeverity));
         }
 
         [Test]
@@ -205,24 +224,60 @@ namespace GunsAreLoud.Tests
             ShotDescriptor fullPower = CreateShot();
             fullPower.HasActiveHeadphones = true;
             fullPower.HeadphonesCompressorThresholdDb = -23f;
-            fullPower.AmmoCaliber = "762x51";
+            Fire(fullPower, "762x51", 9.5f, 840f, 0.9f);
             ShotDescriptor shotgun = CreateShot();
             shotgun.HasActiveHeadphones = true;
             shotgun.HeadphonesCompressorThresholdDb = -23f;
-            shotgun.AmmoCaliber = "12g";
+            // A 12 gauge shell ranked by its slug: 28.3 g at 400 m/s.
+            Fire(shotgun, "12g", 28.3f, 400f, 1.0f);
             ShotDescriptor heavy = CreateShot();
             heavy.HasActiveHeadphones = true;
             heavy.HeadphonesCompressorThresholdDb = -23f;
-            heavy.AmmoCaliber = "127x99";
+            Fire(heavy, "127x99", 42f, 900f, 1.1f);
 
             float intermediateDb = ExposureModel.Calculate(intermediate, _tuning).HeadphonesProtectionDb;
             float fullPowerDb = ExposureModel.Calculate(fullPower, _tuning).HeadphonesProtectionDb;
             float shotgunDb = ExposureModel.Calculate(shotgun, _tuning).HeadphonesProtectionDb;
             float heavyDb = ExposureModel.Calculate(heavy, _tuning).HeadphonesProtectionDb;
 
-            Assert.That(intermediateDb, Is.GreaterThan(fullPowerDb));
-            Assert.That(fullPowerDb, Is.GreaterThan(shotgunDb));
-            Assert.That(shotgunDb, Is.GreaterThan(heavyDb));
+            Assert.That(intermediateDb, Is.GreaterThan(shotgunDb));
+            Assert.That(shotgunDb, Is.GreaterThan(fullPowerDb));
+            Assert.That(fullPowerDb, Is.GreaterThan(heavyDb));
+        }
+
+        [Test]
+        public void HeadsetCaliberPenaltyOfZeroGivesEveryCartridgeTheSameProtection()
+        {
+            _config.HeadsetCaliberPenaltyDb.Value = 0f;
+            _tuning = _config.GetTuning();
+            ShotDescriptor intermediate = CreateShot();
+            intermediate.HasActiveHeadphones = true;
+            intermediate.HeadphonesCompressorThresholdDb = -23f;
+            ShotDescriptor heavy = CreateShot();
+            heavy.HasActiveHeadphones = true;
+            heavy.HeadphonesCompressorThresholdDb = -23f;
+            Fire(heavy, "127x99", 42f, 900f, 1.1f);
+
+            Assert.That(ExposureModel.Calculate(heavy, _tuning).HeadphonesProtectionDb,
+                Is.EqualTo(ExposureModel.Calculate(intermediate, _tuning).HeadphonesProtectionDb));
+            Assert.That(ExposureModel.Calculate(heavy, _tuning).HeadphonesCaliberPenaltyDb, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void ShotLevelReachesTheExposureResult()
+        {
+            ShotDescriptor shot = CreateShot();
+            ExposureResult result = ExposureModel.Calculate(shot, _tuning);
+            ShotLevel level = ShotLevelIndex.Compute(shot);
+
+            Assert.That(result.EnergyJoules, Is.EqualTo(1377f).Within(1f));
+            Assert.That(result.PayloadMassGram, Is.EqualTo(3.4f));
+            Assert.That(result.MuzzleDistance, Is.EqualTo(0.9f));
+            Assert.That(result.EnergyIndex, Is.EqualTo(level.EnergyIndex));
+            Assert.That(result.DistanceIndex, Is.EqualTo(level.DistanceIndex));
+            Assert.That(result.LevelIndex, Is.EqualTo(level.EnergyIndex + level.DistanceIndex).Within(1e-5f));
+            Assert.That(result.BaseSeverity, Is.EqualTo(ExposureModel.BaseSeverity(level.LevelIndex)));
+            Assert.That(result.IndexFallback, Is.False);
         }
 
         [Test]
@@ -240,16 +295,21 @@ namespace GunsAreLoud.Tests
         }
 
         [Test]
-        public void UnknownCaliberUsesConfiguredFallback()
+        public void RoundWithoutMassOrVelocityIsRankedAsTheReferenceCartridge()
         {
             ShotDescriptor shot = CreateShot();
             shot.AmmoCaliber = "ModdedPlasma";
             shot.BulletMassGram = 0f;
+            shot.PayloadMassGram = 0f;
             shot.MuzzleVelocity = 0f;
 
             ExposureResult result = ExposureModel.Calculate(shot, _tuning);
 
-            Assert.That(result.CaliberBaseline, Is.EqualTo(_tuning.UnknownCaliberSeverity));
+            Assert.That(result.IndexFallback, Is.True);
+            Assert.That(result.EnergyIndex, Is.EqualTo(0f));
+            Assert.That(result.LevelIndex, Is.EqualTo(ShotLevelIndex.DistanceIndex(0.9f)));
+            Assert.That(result.BaseSeverity,
+                Is.EqualTo(ExposureModel.BaseSeverity(ShotLevelIndex.DistanceIndex(0.9f))));
         }
 
         [Test]
@@ -273,9 +333,28 @@ namespace GunsAreLoud.Tests
 
             // 36 as of the 1.0.2 clean-up, plus the two hearing switches in General,
             // minus Low-End Method: the pitched copy is the only low-end path,
-            // plus Hear-through Character in 1.1.0.
-            Assert.That(configEntryFields, Is.EqualTo(38));
+            // plus Hear-through Character in 1.1.0, plus Headset Caliber Penalty,
+            // plus the three direct level controls (normalization, target, copy headroom),
+            // plus the Shot Density switch in Gunshots and its depth in Low-level,
+            // plus the Explosion Level switch in Explosions and Muzzle Device Influence in Gunshots.
+            Assert.That(configEntryFields, Is.EqualTo(46));
+            Assert.That(_config.MuzzleDeviceDb, Is.Not.Null);
+            Assert.That(_config.MuzzleDeviceDb.Definition.Section, Is.EqualTo(_config.GunshotContrastDb.Definition.Section));
+            Assert.That(_config.MuzzleDeviceDb.Value, Is.EqualTo(0.4f));
+            Assert.That(_config.ExplosionLevel, Is.Not.Null);
+            Assert.That(_config.ExplosionLevel.Definition.Section, Is.EqualTo(_config.BlastRadius.Definition.Section));
+            Assert.That(_config.ExplosionLevel.Value, Is.True);
+            Assert.That(_config.DirectLevelNormalizationDb, Is.Not.Null);
+            Assert.That(_config.DirectLevelTarget, Is.Not.Null);
+            Assert.That(_config.CopyHeadroomDb, Is.Not.Null);
+            Assert.That(_config.ShotDensity, Is.Not.Null);
+            Assert.That(_config.ShotDensity.Definition.Section, Is.EqualTo(_config.GunshotContrastDb.Definition.Section));
+            Assert.That(_config.ShotDensityDb, Is.Not.Null);
+            Assert.That(_config.ShotDensityDb.Definition.Section, Is.EqualTo(_config.CopyHeadroomDb.Definition.Section));
+            Assert.That(_config.DirectLevelNormalizationDb.Definition.Section,
+                Is.EqualTo(_config.LowEndNormalizationDb.Definition.Section));
             Assert.That(_config.HearThroughCharacter, Is.Not.Null);
+            Assert.That(_config.HeadsetCaliberPenaltyDb, Is.Not.Null);
             Assert.That(_config.HeadphoneMode, Is.Not.Null);
             Assert.That(_config.GunshotContrastDb, Is.Not.Null);
             Assert.That(_config.LowEndNormalizationDb, Is.Not.Null);
@@ -307,12 +386,18 @@ namespace GunsAreLoud.Tests
             Assert.That(_config.EarDifference.Value, Is.EqualTo(140f).Within(0.0001f));
             Assert.That(_config.HeadphoneMode.Value, Is.EqualTo(HeadphoneMode.Realistic));
             Assert.That(_config.HeadphonesFit.Value, Is.EqualTo(HeadphonesFitPreset.Tight));
+            Assert.That(_config.HeadsetCaliberPenaltyDb.Value, Is.EqualTo(6f));
+            Assert.That(_tuning.HeadsetCaliberPenaltyDb, Is.EqualTo(6f));
             Assert.That(_config.AutomaticPitchedRoute.Value, Is.EqualTo(AutomaticPitchedRoute.CachedReport));
             Assert.That(_config.AutomaticTailMode.Value, Is.EqualTo(AutomaticTailMode.FullReportPerShot));
             Assert.That(_config.AutomaticReportOverlapShots.Value, Is.EqualTo(6f).Within(0.0001f));
             Assert.That(_config.PitchedLayerSemitones.Value, Is.EqualTo(12f).Within(0.0001f));
             Assert.That(_config.LowEndNormalizationDb.Value, Is.EqualTo(12f));
-            Assert.That(_config.CartridgeContrastDb.Value, Is.EqualTo(6f));
+            Assert.That(_config.CartridgeContrastDb.Value, Is.EqualTo(3f));
+            Assert.That(_config.DirectLevelNormalizationDb.Value, Is.EqualTo(12f));
+            Assert.That(_config.DirectLevelTarget.Value, Is.EqualTo(DirectLevelTarget.Energy));
+            Assert.That(_config.CopyHeadroomDb.Value, Is.EqualTo(3f));
+            Assert.That(_tuning.DirectLevelNormalizationDb, Is.EqualTo(12f));
             Assert.That(_config.PitchedLayerLowpassHz.Value, Is.EqualTo(2000f));
             Assert.That(_config.PitchedLayerHighpassHz.Value, Is.EqualTo(10f).Within(0.0001f));
             Assert.That(_config.PitchedLayerFadePercent.Value, Is.EqualTo(50f).Within(0.0001f));
@@ -343,6 +428,9 @@ namespace GunsAreLoud.Tests
                 _config.PitchedLayerSemitones,
                 _config.LowEndNormalizationDb,
                 _config.CartridgeContrastDb,
+                _config.DirectLevelNormalizationDb,
+                _config.DirectLevelTarget,
+                _config.CopyHeadroomDb,
                 _config.PitchedLayerLowpassHz,
                 _config.PitchedLayerHighpassHz,
                 _config.PitchedLayerFadePercent,
@@ -360,6 +448,11 @@ namespace GunsAreLoud.Tests
                     tag.GetType().GetField("IsAdvanced")?.GetValue(tag) is bool value && value),
                     $"{entry.Definition.Section} / {entry.Definition.Key} must be Advanced.");
             }
+
+            // The cartridge penalty sits with the other headset controls in General.
+            Assert.That(_config.HeadsetCaliberPenaltyDb.Definition.Section, Is.EqualTo("01. General"));
+            Assert.That(_config.HeadsetCaliberPenaltyDb.Description.Tags, Has.None.Matches<object>(tag =>
+                tag.GetType().GetField("IsAdvanced")?.GetValue(tag) is bool value && value));
         }
 
         [Test]
@@ -384,10 +477,10 @@ namespace GunsAreLoud.Tests
         public void LargerCaliberReceivesMoreDirectBoost()
         {
             ShotDescriptor pistol = CreateShot();
-            pistol.AmmoCaliber = "9x19PARA";
+            Fire(pistol, "9x19PARA", 7.5f, 340f, 0.55f);
             pistol.WeaponCategory = WeaponCategory.Pistol;
             ShotDescriptor heavy = CreateShot();
-            heavy.AmmoCaliber = "127x99";
+            Fire(heavy, "127x99", 42f, 900f, 1.1f);
             heavy.WeaponCategory = WeaponCategory.Heavy;
 
             ExposureResult pistolExposure = ExposureModel.Calculate(pistol, _tuning);
@@ -517,16 +610,19 @@ namespace GunsAreLoud.Tests
         {
             float octaveDown = PitchedGunshotLayer.CalculatePitchRatio(12f);
             float twoOctavesDown = PitchedGunshotLayer.CalculatePitchRatio(24f);
-            float rifleGain = PitchedGunshotLayer.CalculateLayerGain(0.4f, 99f);
-            float heavyGain = PitchedGunshotLayer.CalculateLayerGain(0.4f, 68f);
-            float boostedGain = PitchedGunshotLayer.CalculateLayerGain(0.4f, 99f, 6f);
-            float gainAtTwelve = PitchedGunshotLayer.CalculateLayerGain(0.4f, 99f, 12f);
-            float gainAtThirty = PitchedGunshotLayer.CalculateLayerGain(0.4f, 99f, 30f);
+            // L_E of a median 5.45x39 round and of a median .50 BMG round.
+            float rifleGain = PitchedGunshotLayer.CalculateLayerGain(0.4f, -1.1f);
+            float heavyGain = PitchedGunshotLayer.CalculateLayerGain(0.4f, 9.83f);
+            float boostedGain = PitchedGunshotLayer.CalculateLayerGain(0.4f, -1.1f, 6f);
+            float gainAtTwelve = PitchedGunshotLayer.CalculateLayerGain(0.4f, -1.1f, 12f);
+            float gainAtThirty = PitchedGunshotLayer.CalculateLayerGain(0.4f, -1.1f, 30f);
 
             Assert.That(octaveDown, Is.EqualTo(0.5f).Within(0.0001f));
             Assert.That(twoOctavesDown, Is.EqualTo(0.25f).Within(0.0001f));
             Assert.That(heavyGain, Is.GreaterThan(rifleGain));
-            Assert.That(heavyGain, Is.LessThanOrEqualTo(0.7625f).Within(0.0001f));
+            Assert.That(heavyGain, Is.EqualTo(0.5f * (float)System.Math.Pow(10.0, 3.5 / 20.0)).Within(0.0001f),
+                "the heaviest rounds stop at the upper bound of the cartridge weight");
+            Assert.That(rifleGain, Is.EqualTo(0.5f * (float)System.Math.Pow(10.0, -1.1 * 3.0 / 5.1 / 20.0)).Within(0.0001f));
             Assert.That(boostedGain, Is.GreaterThan(rifleGain * 1.99f));
             Assert.That(gainAtTwelve, Is.GreaterThan(boostedGain));
             Assert.That(gainAtThirty, Is.GreaterThan(gainAtTwelve * 7.9f));
@@ -734,7 +830,7 @@ namespace GunsAreLoud.Tests
         {
             ShotDescriptor rifle = CreateShot();
             ShotDescriptor heavy = CreateShot();
-            heavy.AmmoCaliber = "127x99";
+            Fire(heavy, "127x99", 42f, 900f, 1.1f);
             heavy.WeaponCategory = WeaponCategory.Heavy;
 
             float rifleFrequency = DirectLoudnessModel.CalculatePressureFrequencyHz(
@@ -769,7 +865,7 @@ namespace GunsAreLoud.Tests
             _config.IndoorEmphasis.Value = 200f;
             TuningSnapshot tuning = _config.GetTuning();
             ShotDescriptor shot = CreateShot();
-            shot.AmmoCaliber = "127x99";
+            Fire(shot, "127x99", 42f, 900f, 1.1f);
             shot.WeaponCategory = WeaponCategory.Heavy;
             shot.IsIndoor = true;
             ExposureResult exposure = ExposureModel.Calculate(shot, tuning);
@@ -780,13 +876,26 @@ namespace GunsAreLoud.Tests
             Assert.That(boost, Is.EqualTo(6.5f));
         }
 
+        /// <summary>A single-projectile round of the given caliber, fired from the given distance.</summary>
+        private static void Fire(ShotDescriptor shot, string caliber, float massGram, float velocity, float distance)
+        {
+            shot.AmmoCaliber = caliber;
+            shot.BulletMassGram = massGram;
+            shot.PayloadMassGram = massGram;
+            shot.ProjectileCount = 1;
+            shot.MuzzleVelocity = velocity;
+            shot.MuzzleDistance = distance;
+        }
+
         private static ShotDescriptor CreateShot()
         {
             return new ShotDescriptor
             {
                 AmmoCaliber = "545x39",
                 BulletMassGram = 3.4f,
+                PayloadMassGram = 3.4f,
                 MuzzleVelocity = 900f,
+                MuzzleDistance = 0.9f,
                 ProjectileCount = 1,
                 WeaponClass = "assaultRifle",
                 WeaponCategory = WeaponCategory.LongGun,

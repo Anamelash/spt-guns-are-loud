@@ -1,7 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using EFT;
+using GunsAreLoud.Client.Configuration;
+using GunsAreLoud.Client.Engine;
 using GunsAreLoud.Client.Runtime;
 using HarmonyLib;
 using UnityEngine;
@@ -13,14 +15,28 @@ namespace GunsAreLoud.Client.Audio
     {
         internal readonly float[] Samples;
         internal readonly int Frames;
+        // The peak histogram runs on past the kept prefix, over the whole clip,
+        // without keeping its samples.
+        internal readonly int HistogramFrames;
+        internal readonly PeakHistogram Histogram;
         private int _written;
+        private int _measured;
         private int _complete;
+        private int _histogramComplete;
         internal bool Complete => Volatile.Read(ref _complete) != 0;
+        internal bool TracksHistogram => Histogram != null;
+        internal bool HistogramComplete => Volatile.Read(ref _histogramComplete) != 0;
+        internal int MeasuredFrames => Volatile.Read(ref _measured);
 
-        internal SilentPcmBuffer(int frames)
+        internal SilentPcmBuffer(int frames, int histogramFrames = 0)
         {
             Frames = Math.Max(1, frames);
             Samples = new float[Frames * 2];
+            if (histogramFrames > 0)
+            {
+                HistogramFrames = histogramFrames;
+                Histogram = new PeakHistogram();
+            }
         }
 
         internal void ProcessAndSilence(float[] data, int channels)
@@ -28,8 +44,22 @@ namespace GunsAreLoud.Client.Audio
             if (data == null) return;
             try
             {
-                if (channels <= 0 || Complete) return;
-                int count = Math.Min(data.Length / channels, Frames - _written);
+                if (channels <= 0) return;
+                int available = data.Length / channels;
+                if (Histogram != null && !HistogramComplete)
+                {
+                    int measure = Math.Min(available, HistogramFrames - _measured);
+                    for (int frame = 0; frame < measure; frame++)
+                    {
+                        float left = Math.Abs(data[frame * channels]);
+                        float right = Math.Abs(data[frame * channels + (channels > 1 ? 1 : 0)]);
+                        Histogram.Add(left > right ? left : right);
+                    }
+                    _measured += measure;
+                    if (_measured >= HistogramFrames) Volatile.Write(ref _histogramComplete, 1);
+                }
+                if (Complete) return;
+                int count = Math.Min(available, Frames - _written);
                 for (int frame = 0; frame < count; frame++)
                 {
                     Samples[(_written + frame) * 2] = data[frame * channels];
@@ -103,8 +133,15 @@ namespace GunsAreLoud.Client.Audio
         private int _rate;
         private float _nextDiscovery;
         private bool _failed;
+        private long _bankFingerprint;
 
         private static bool _releasePending;
+        private static bool _remeasurePending;
+
+        // Under a replacement sound engine, how each bank is played goes to the
+        // main log once per session: it is the first thing to look at when
+        // that engine changes, and the detailed log is rate-limited and off.
+        private static readonly HashSet<string> ReportedBanks = new HashSet<string>();
 
         private void Awake() { _instances++; }
 
@@ -129,7 +166,23 @@ namespace GunsAreLoud.Client.Audio
             PitchedGunshotLayer.StopAllLayers();
             AutomaticCopyCache.Clear();
             LowEndNormalizationCache.Clear();
+            DirectLevelStore.Clear();
             return true;
+        }
+
+        /// <summary>
+        /// Forgets every measurement of this session, so the held weapon's
+        /// recordings are decoded and measured again from scratch. The pitched
+        /// pools release their voices first: the cached clips are destroyed here.
+        /// </summary>
+        internal static void ForgetMeasurements()
+        {
+            PitchedGunshotLayer.StopAllLayers();
+            AutomaticCopyCache.Clear();
+            LowEndNormalizationCache.Clear();
+            DirectLevelStore.Clear();
+            ReportedPaths.Clear();
+            _remeasurePending = true;
         }
 
         internal static bool Attach(WeaponSoundPlayer weapon)
@@ -168,9 +221,15 @@ namespace GunsAreLoud.Client.Audio
                 StopWorkers();
                 _jobs.Clear();
                 _pending.Clear();
+                _directReads.Clear();
                 _recipes.Clear();
                 _plannedBodies.Clear();
                 _rate = rate;
+            }
+            if (_remeasurePending)
+            {
+                _remeasurePending = false;
+                DropAllWork();
             }
             if (Time.unscaledTime >= _nextDiscovery)
             {
@@ -179,13 +238,19 @@ namespace GunsAreLoud.Client.Audio
                 if (AudioRuntimeLookup.Listener == null) return;
                 using (PerformanceTrace.Measure(PerformanceArea.WarmupPlan))
                 {
+                    // The engine may still be putting its own banks on the weapon;
+                    // work queued for the banks it replaced will never be heard.
+                    SoundEngine.Shots.PrepareWeapon(_weapon);
+                    long fingerprint = BankFingerprint(_weapon);
+                    if (_bankFingerprint != 0 && fingerprint != _bankFingerprint) DropWorkForReplacedBanks();
+                    _bankFingerprint = fingerprint;
                     SoundBank activeBody = _weapon.IsSilenced ? _weapon.BodySilenced : _weapon.Body;
                     SoundBank activeTail = _weapon.IsSilenced ? _weapon.TailSilenced : _weapon.Tail;
                     if (_weapon.IsAutoWeapon)
                     {
-                        PlanBank(activeBody, activeTail, (int)bridge.Environment, _weapon.IsSilenced);
-                        PlanBank(_weapon.Body, _weapon.Tail, (int)bridge.Environment, false);
-                        PlanBank(_weapon.BodySilenced, _weapon.TailSilenced, (int)bridge.Environment, true);
+                        PlanBody(activeBody, activeTail, (int)bridge.Environment, _weapon.IsSilenced);
+                        PlanBody(_weapon.Body, _weapon.Tail, (int)bridge.Environment, false);
+                        PlanBody(_weapon.BodySilenced, _weapon.TailSilenced, (int)bridge.Environment, true);
                     }
                     else
                     {
@@ -207,28 +272,73 @@ namespace GunsAreLoud.Client.Audio
                 {
                     if (AudioListener.pause) worker.Deadline += Time.unscaledDeltaTime;
                     Job job = worker.Job;
-                    if (job.Buffer.Complete)
+                    SilentPcmBuffer decoded = worker.Buffer;
+                    if (job.PrefixDone)
+                    {
+                        // The prefix is published; the worker only finishes the
+                        // whole-clip peak histogram of a one-shot.
+                        // The histogram is read only once the worker no longer feeds it.
+                        if (decoded.HistogramComplete)
+                        {
+                            worker.Stop();
+                            FinishPeakMeasure(job, decoded);
+                        }
+                        else if (!AudioListener.pause && Time.unscaledTime > worker.Deadline)
+                        {
+                            worker.Stop();
+                            // A clip may end a few frames short of its nominal length.
+                            if (decoded.MeasuredFrames >= decoded.HistogramFrames * 0.9) FinishPeakMeasure(job, decoded);
+                            else if (job.MeasureDirect)
+                            {
+                                // Measured again from the start on the next pass.
+                                job.Ready = false;
+                                job.PrefixDone = false;
+                                job.Attempts = Math.Max(0, job.Attempts - 1);
+                                if (!_pending.Contains(job)) _pending.Add(job);
+                            }
+                        }
+                    }
+                    else if (decoded.Complete)
                     {
                         AutomaticCopyCache.FindOnsetFrame(job.Buffer.Samples, job.Frames, 2, out float peak);
                         job.Ready = peak >= 0.0005f;
-                        worker.Stop();
                         if (!job.Ready)
                         {
+                            worker.Stop();
                             Retry(job, "silent PCM");
                             if (job.Attempts >= 2) CompleteJob(job);
                             else job.Buffer = null;
                         }
                         else
                         {
+                            job.PrefixDone = true;
+                            bool keepLevels = PublishDirectFromPrefix(job, decoded);
+                            if (!job.MeasureDirect || decoded.HistogramComplete)
+                            {
+                                worker.Stop();
+                                FinishPeakMeasure(job, decoded);
+                            }
                             if (job.Body)
                                 using (PerformanceTrace.Measure(PerformanceArea.WarmupPublish))
                                     AutomaticCopyCache.PublishRoundBody(job.Clip, job.Frames / (float)_rate,
                                         _rate, job.Frames, 2, job.Buffer.Samples, nativePitch: true);
-                            if (job.Normalize)
+                            // A loop beat that will be composed with its tail does not
+                            // displace levels this event already has from the cache.
+                            bool composed = job.Body && job.RecipeConsumers > 0;
+                            if (job.Normalize && !(composed && LowEndNormalizationCache.IsCurrent(job.Clip)))
                                 using (PerformanceTrace.Measure(PerformanceArea.WarmupRegister))
+                                {
+                                    // A whole shot standing in for an automatic loop
+                                    // beat switches to its decay where its own attack
+                                    // ends, not after a beat-length window.
+                                    float bodySeconds = job.Body ? job.Frames / (float)_rate
+                                        : job.MeasureBody ? LowEndLevelModel.EstimateBodySeconds(job.Buffer.Samples, _rate)
+                                        : 0f;
                                     LowEndNormalizationCache.Register(job.Clip, _rate, job.Buffer.Samples,
-                                        job.ReferenceVolume, job.Group,
-                                        job.Body ? job.Frames / (float)_rate : 0f);
+                                        job.ReferenceVolume, job.Group, bodySeconds,
+                                        job.Body ? "loopBeat" : job.MeasureBody && bodySeconds > 0f ? "measured" : "default",
+                                        composed ? null : job.CacheKey, keepLevels);
+                                }
                             CompleteJob(job);
                         }
                     }
@@ -284,6 +394,7 @@ namespace GunsAreLoud.Client.Audio
                 if (worker == null) _workers[index] = worker = new Worker(transform, index);
                 worker.Start(next, _rate);
             }
+            ProcessDirectRead(ref loadedThisFrame);
             bool composedThisFrame = false;
             for (int recipeIndex = _recipes.Count - 1; recipeIndex >= 0; recipeIndex--)
             {
@@ -307,9 +418,21 @@ namespace GunsAreLoud.Client.Audio
                 using (PerformanceTrace.Measure(PerformanceArea.WarmupPublish))
                     AutomaticCopyCache.PublishFullReport(recipe.Body.Clip, recipe.Tail.Clip, _rate, pcm);
                 using (PerformanceTrace.Measure(PerformanceArea.WarmupRegister))
+                {
+                    // The composed report is the stock single shot: the event whose
+                    // direct level the correction works from. Its key holds no
+                    // content hash, so levels taken from the cache stand only if
+                    // the decoded report starts exactly as the one they came from.
+                    bool cachedEvent = CachedPrefixMatches(recipe.EventKey, pcm, _rate, out string reportHash);
                     LowEndNormalizationCache.Register(recipe.Body.Clip, _rate, pcm,
                         recipe.Body.ReferenceVolume, recipe.Body.Group,
-                        recipe.Body.Frames / (float)_rate);
+                        recipe.Body.Frames / (float)_rate, cacheKey: recipe.EventKey, keepMeasured: cachedEvent);
+                    if (!cachedEvent || !DirectLevelStore.IsComplete(recipe.Body.Clip))
+                        PublishDirect(recipe.Body.Clip, recipe.EventKey, recipe.Body.ReferenceVolume,
+                            DirectLevelMeter.MeasureAttackWindow(pcm, 2, _rate),
+                            DirectLevelMeter.MeasurePeakDb(pcm, 2), "playback", reportHash, _rate,
+                            replace: true);
+                }
                 // A release tail must inherit its body's correction, not have
                 // its quiet decay independently boosted to a full attack level.
                 LowEndNormalizationCache.Alias(recipe.Tail.Clip, recipe.Body.Clip);
@@ -319,40 +442,92 @@ namespace GunsAreLoud.Client.Audio
             }
         }
 
-        private void PlanBank(SoundBank body, SoundBank tail, int currentEnvironment, bool suppressed)
+        /// <summary>
+        /// An automatic weapon's close body clips, each prepared the way the
+        /// engine playing it will play it: a loop beat with its tail, cut into a
+        /// cached report, or a whole shot of which only the normalizer's prefix
+        /// is needed, exactly as for a pistol. The stock engine loops every one.
+        /// </summary>
+        private void PlanBody(SoundBank body, SoundBank tail, int currentEnvironment, bool suppressed)
         {
             if (body?.Environments == null) return;
+            IShotEngine engine = SoundEngine.Shots;
             int count = body.HasEnvironment ? body.Environments.Length : 1;
             for (int pass = 0; pass < count; pass++)
             {
                 int environment = (Math.Max(0, currentEnvironment) + pass) % count;
                 AudioClip[] bodies = CloseClips(body, environment);
                 AudioClip[] tails = CloseClips(tail, environment);
+                // A whole SEB bank takes seconds to decode in real time: a
+                // variant fired before its turn borrows its siblings' level.
+                LowEndNormalizationCache.Siblings(bodies);
+                DirectLevelStore.Siblings(bodies);
+                int loops = 0, oneShots = 0, planned = 0;
                 for (int index = 0; index < bodies.Length; index++)
                 {
                     AudioClip clip = bodies[index];
-                    if (clip == null || AutomaticCopyCache.TryGetFullReport(clip, _rate, out _) ||
-                        !_plannedBodies.Add(clip.GetInstanceID())) continue;
-                    float beat = body.ClipLength > 0f ? body.ClipLength / 16f : clip.length / 16f;
-                    Job bodyJob = AddJob(clip, Math.Max(1, (int)(beat * _rate)), true,
-                        true, body.BaseVolume, environment * 2 + (suppressed ? 1 : 0));
-                    AudioClip tailClip = tails.Length > 0 ? tails[index % tails.Length] : null;
-                    if (tailClip != null)
+                    if (clip == null) continue;
+                    if (engine.ClassifyBody(body, clip) == BodyModel.Loop)
                     {
-                        Job tailJob = AddJob(tailClip, Math.Max(1, Mathf.RoundToInt(tailClip.length * _rate)), false,
-                            group: environment * 2 + (suppressed ? 1 : 0));
-                        bodyJob.RecipeConsumers++;
-                        tailJob.RecipeConsumers++;
-                        _recipes.Add(new Recipe { Body = bodyJob, Tail = tailJob,
-                            TailGain = tail.BaseVolume / Mathf.Max(0.001f, body.BaseVolume) });
+                        loops++;
+                        if (PlanLoopClip(body, tail, tails, index, clip, environment, suppressed)) planned++;
                     }
-                    if (DetailedDiagnostics.TryBegin(
-                        DiagnosticEventKind.AutomaticWarmup, out DiagnosticReservation reservation))
-                        DetailedDiagnostics.Commit(
-                            reservation,
-                            $"automatic prewarm queued body={clip.name} tail={tailClip?.name ?? "none"}");
+                    else
+                    {
+                        oneShots++;
+                        if (PlanOneShotClip(body, clip, environment, suppressed, measureBody: true)) planned++;
+                    }
                 }
+                if (planned == 0) continue;
+                string line =
+                    $"warmup bank={body.name} env={environment} suppressed={suppressed} " +
+                    $"model={(oneShots == 0 ? "loop" : loops == 0 ? "one-shot" : "mixed")} " +
+                    $"loops={loops} oneShots={oneShots} variants={bodies.Length} " +
+                    $"reference={body.BaseVolume:0.000} plays={(engine.PlaysShotsItself(body) ? "engine" : "queue")} " +
+                    $"engine={engine.Name}";
+                if (SoundEngine.Module != null && ReportedBanks.Add(body.name + "/" + environment + "/" + suppressed))
+                    Plugin.Log?.LogInfo(line);
+                if (DetailedDiagnostics.TryBegin(
+                    DiagnosticEventKind.AutomaticWarmup, out DiagnosticReservation reservation))
+                    DetailedDiagnostics.Commit(reservation, line);
             }
+        }
+
+        private bool PlanLoopClip(SoundBank body, SoundBank tail, AudioClip[] tails, int index, AudioClip clip,
+            int environment, bool suppressed)
+        {
+            if (AutomaticCopyCache.TryGetFullReport(clip, _rate, out _) ||
+                !_plannedBodies.Add(clip.GetInstanceID())) return false;
+            float beat = body.ClipLength > 0f ? body.ClipLength / 16f : clip.length / 16f;
+            int group = environment * 2 + (suppressed ? 1 : 0);
+            AudioClip tailClip = tails.Length > 0 ? tails[index % tails.Length] : null;
+            float tailGain = tailClip != null ? tail.BaseVolume / Mathf.Max(0.001f, body.BaseVolume) : 0f;
+            // The stock single shot is one beat of the loop and the tail after
+            // it: one event, measured and cached as one.
+            string eventKey = LevelCache.EventKey(StreamKey(clip), tailClip != null ? StreamKey(tailClip) : null, tailGain);
+            if (tailClip != null) DirectLevelStore.Alias(tailClip, clip, tailGain);
+            if (ApplyCached(clip, eventKey, body.BaseVolume, group, out bool layerCached))
+                NotePath(clip, "cache", layerCached ? null : " layer=decode");
+            if (layerCached && tailClip != null) LowEndNormalizationCache.Alias(tailClip, clip);
+            // The report itself is still decoded: the copy plays it.
+            Job bodyJob = AddJob(clip, Math.Max(1, (int)(beat * _rate)), true,
+                true, body.BaseVolume, group);
+            bodyJob.CacheKey = eventKey;
+            if (tailClip != null)
+            {
+                Job tailJob = AddJob(tailClip, Math.Max(1, Mathf.RoundToInt(tailClip.length * _rate)), false,
+                    group: group);
+                bodyJob.RecipeConsumers++;
+                tailJob.RecipeConsumers++;
+                _recipes.Add(new Recipe { Body = bodyJob, Tail = tailJob, TailGain = tailGain, EventKey = eventKey });
+            }
+            else bodyJob.MeasureDirectBeat = true;
+            if (DetailedDiagnostics.TryBegin(
+                DiagnosticEventKind.AutomaticWarmup, out DiagnosticReservation reservation))
+                DetailedDiagnostics.Commit(
+                    reservation,
+                    $"automatic prewarm queued body={clip.name} tail={tailClip?.name ?? "none"}");
+            return true;
         }
 
         private void PlanOneShot(SoundBank bank, int currentEnvironment, bool suppressed)
@@ -362,17 +537,248 @@ namespace GunsAreLoud.Client.Audio
             for (int pass = 0; pass < count; pass++)
             {
                 int environment = (Math.Max(0, currentEnvironment) + pass) % count;
-                foreach (AudioClip clip in CloseClips(bank, environment))
+                AudioClip[] clips = CloseClips(bank, environment);
+                DirectLevelStore.Siblings(clips);
+                foreach (AudioClip clip in clips)
+                    if (clip != null) PlanOneShotClip(bank, clip, environment, suppressed);
+            }
+        }
+
+        private bool PlanOneShotClip(SoundBank bank, AudioClip clip, int environment, bool suppressed,
+            bool measureBody = false)
+        {
+            // A clip planned again without a finished direct measure (its decode
+            // was cut short) is measured again.
+            if (LowEndNormalizationCache.Contains(clip) && DirectLevelStore.IsComplete(clip) ||
+                !_plannedBodies.Add(clip.GetInstanceID())) return false;
+            int group = environment * 2 + (suppressed ? 1 : 0);
+            // A clip decompressed in memory is read directly; its key needs the
+            // samples, so the cache is consulted once they are read.
+            if (clip.loadType == AudioClipLoadType.DecompressOnLoad)
+            {
+                _directReads.Add(new DirectRead { Clip = clip, Volume = bank.BaseVolume, Group = group,
+                    MeasureBody = measureBody });
+                return true;
+            }
+            AddOneShotJob(clip, bank.BaseVolume, group, measureBody, StreamKey(clip), consultCache: true);
+            return true;
+        }
+
+        /// <summary>
+        /// The playback path of a one-shot: only the raw prefix is kept for the
+        /// normalizer, while the peak histogram runs over the whole clip. The
+        /// live copy still plays the engine's original clip.
+        /// </summary>
+        private void AddOneShotJob(AudioClip clip, float volume, int group, bool measureBody, string key,
+            bool consultCache)
+        {
+            // A cached clip is ready at once, and still decoded in the background:
+            // its key holds no content hash, so the decoded prefix is checked
+            // against the one it was measured from.
+            if (consultCache && ApplyCached(clip, key, volume, group, out bool layerCached))
+                NotePath(clip, "cache", layerCached ? " verify=decode" : " layer=decode");
+            int frames = Math.Max(1, (int)(Math.Min(1.25f, clip.length) * _rate));
+            Job job = AddJob(clip, frames, false, true, volume, group);
+            // Only an automatic weapon's whole-shot body: pistols, bolt actions
+            // and shotguns keep the window they were tuned with.
+            job.MeasureBody |= measureBody;
+            job.CacheKey = key;
+            {
+                job.MeasureDirect = true;
+                // A clip can end a few frames short of its nominal length once
+                // resampled; the last 10 ms of a tail do not move its percentile.
+                job.HistogramFrames = Math.Max(frames, (int)(clip.length * _rate) - _rate / 100);
+            }
+        }
+
+        internal static string StreamKey(AudioClip clip) =>
+            LevelCache.ClipKey(clip.name, clip.samples, clip.frequency, clip.channels, LevelCache.StreamTag);
+
+        /// <summary>
+        /// Registers what the persistent cache holds for this recording or event.
+        /// Returns whether the direct level was there; <paramref name="layerCached"/>
+        /// tells whether the copy's levels were too, measured in the current band.
+        /// </summary>
+        private static bool ApplyCached(AudioClip clip, string key, float volume, int group, out bool layerCached)
+        {
+            layerCached = false;
+            if (!LevelCache.TryGet(key, out LevelCacheEntry entry)) return false;
+            if (entry.HasDirect) DirectLevelStore.Set(clip, entry.AttackWindowDb, entry.PeakDb, "cache");
+            TuningSnapshot tuning = Plugin.ModConfig?.GetTuning();
+            if (tuning != null && entry.HasLayer)
+            {
+                LowEndNormalizationCache.BandOf(tuning.PitchedLayerSemitones, tuning.PitchedLayerHighpassHz,
+                    tuning.PitchedLayerLowpassHz, out float pitch, out float high, out float low);
+                if (entry.BandMatches(pitch, high, low))
                 {
-                    if (clip == null || LowEndNormalizationCache.Contains(clip) ||
-                        !_plannedBodies.Add(clip.GetInstanceID())) continue;
-                    // Only the raw prefix is needed for the normalizer. The live
-                    // pistol/bolt-action copy still plays EFT's original clip.
-                    int frames = Math.Max(1, (int)(Math.Min(1.25f, clip.length) * _rate));
-                    AddJob(clip, frames, false, true, bank.BaseVolume,
-                        environment * 2 + (suppressed ? 1 : 0));
+                    LevelCacheEntry current = entry.Clone();
+                    current.Group = group;
+                    LowEndNormalizationCache.RegisterMeasured(clip, current, volume, key);
+                    layerCached = true;
                 }
             }
+            return entry.HasDirect;
+        }
+
+        private static void PublishDirect(AudioClip clip, string key, float volume, float attackWindowDb,
+            float peakDb, string source, string prefixHash = null, int prefixRate = 0, bool replace = false)
+        {
+            if (replace && clip != null) DirectLevelStore.Replace(clip.GetInstanceID(), attackWindowDb, peakDb, source);
+            else DirectLevelStore.Set(clip, attackWindowDb, peakDb, source);
+            LevelCache.PutDirect(key, attackWindowDb, peakDb, volume);
+            LevelCache.PutPrefix(key, prefixHash, prefixRate);
+            NotePath(clip, source,
+                $" k50={attackWindowDb:0.0}dB peak={peakDb:0.0}dBFS");
+        }
+
+        /// <summary>
+        /// The attack window of a one-shot is known once its prefix is in; a
+        /// loop beat without a tail is the whole event on its own.
+        /// </summary>
+        /// <returns>Whether levels already held for this clip from the cache
+        /// still stand: false once the decoded prefix shows the recording changed.</returns>
+        private bool PublishDirectFromPrefix(Job job, SilentPcmBuffer decoded)
+        {
+            if (job.CacheKey == null || !job.MeasureDirectBeat && !job.MeasureDirect) return true;
+            bool matches = CachedPrefixMatches(job.CacheKey, decoded.Samples, _rate, out string hash);
+            job.PrefixHash = hash;
+            if (job.MeasureDirectBeat)
+            {
+                if (!matches)
+                    PublishDirect(job.Clip, job.CacheKey, job.ReferenceVolume,
+                        DirectLevelMeter.MeasureAttackWindow(decoded.Samples, 2, _rate),
+                        DirectLevelMeter.MeasurePeakDb(decoded.Samples, 2), "playback", hash, _rate,
+                        replace: true);
+                return matches;
+            }
+            if (!job.MeasureDirect) return true;
+            if (matches && DirectLevelStore.IsComplete(job.Clip))
+            {
+                // The cached measure is of this very recording: nothing to redo.
+                job.MeasureDirect = false;
+                return true;
+            }
+            job.AttackWindowDb = DirectLevelMeter.MeasureAttackWindow(decoded.Samples, 2, _rate);
+            DirectLevelStore.Replace(job.Clip.GetInstanceID(), job.AttackWindowDb, float.NaN, "playback");
+            return false;
+        }
+
+        private void FinishPeakMeasure(Job job, SilentPcmBuffer decoded)
+        {
+            if (!job.MeasureDirect || decoded.Histogram == null || float.IsNaN(job.AttackWindowDb)) return;
+            job.MeasureDirect = false;
+            PublishDirect(job.Clip, job.CacheKey, job.ReferenceVolume, job.AttackWindowDb,
+                decoded.Histogram.PeakDb, "playback", job.PrefixHash, _rate,
+                replace: true);
+        }
+
+        /// <summary>
+        /// Whether the persistent entry was measured from exactly these decoded
+        /// samples: the hash of the first 1.25 s at the same output rate.
+        /// </summary>
+        internal static bool CachedPrefixMatches(string key, float[] pcm, int rate, out string hash)
+        {
+            int count = Math.Min(pcm.Length, (int)(rate * 1.25f) * 2);
+            hash = LevelCache.HashTag(LevelCache.Fnv1a(pcm, count));
+            return LevelCache.TryGet(key, out LevelCacheEntry entry) && entry.HasDirect &&
+                entry.PrefixHash == hash && entry.PrefixRate == rate;
+        }
+
+        // One clip read per frame, on the main thread. A clip that cannot be
+        // read, or reads as silence or a constant, goes to the playback path.
+        private readonly List<DirectRead> _directReads = new List<DirectRead>();
+
+        private sealed class DirectRead
+        {
+            internal AudioClip Clip;
+            internal float Volume;
+            internal int Group;
+            internal bool MeasureBody;
+            internal float Deadline;
+        }
+
+        private void ProcessDirectRead(ref bool loadedThisFrame)
+        {
+            while (_directReads.Count > 0 && _directReads[0].Clip == null) _directReads.RemoveAt(0);
+            if (_directReads.Count == 0) return;
+            DirectRead read = _directReads[0];
+            AudioClip clip = read.Clip;
+            if (clip.loadState == AudioDataLoadState.Unloaded)
+            {
+                if (loadedThisFrame) return;
+                loadedThisFrame = true;
+                read.Deadline = Time.unscaledTime + 10f;
+                using (PerformanceTrace.Measure(PerformanceArea.WarmupLoad))
+                    clip.LoadAudioData();
+            }
+            if (clip.loadState == AudioDataLoadState.Loading)
+            {
+                if (read.Deadline <= 0f) read.Deadline = Time.unscaledTime + 10f;
+                if (Time.unscaledTime < read.Deadline) return;
+            }
+            _directReads.RemoveAt(0);
+            string key = null;
+            using (PerformanceTrace.Measure(PerformanceArea.WarmupRegister))
+            {
+                if (clip.loadState == AudioDataLoadState.Loaded &&
+                    TryReadClip(clip, out float[] stereo, out ulong hash))
+                {
+                    key = LevelCache.ClipKey(clip.name, clip.samples, clip.frequency, clip.channels,
+                        LevelCache.HashTag(hash));
+                    if (ApplyCached(clip, key, read.Volume, read.Group, out bool layerCached))
+                        NotePath(clip, "cache", layerCached ? null : " layer=getdata");
+                    else
+                        PublishDirect(clip, key, read.Volume,
+                            DirectLevelMeter.MeasureAttackWindow(stereo, 2, clip.frequency),
+                            DirectLevelMeter.MeasurePeakDb(stereo, 2), "getdata");
+                    if (!layerCached)
+                    {
+                        // The same prefix the playback path keeps, at the clip's own rate.
+                        int prefixFrames = Math.Min(stereo.Length / 2, (int)(clip.frequency * 1.25f));
+                        var prefix = new float[prefixFrames * 2];
+                        Array.Copy(stereo, prefix, prefix.Length);
+                        float bodySeconds = read.MeasureBody
+                            ? LowEndLevelModel.EstimateBodySeconds(prefix, clip.frequency) : 0f;
+                        LowEndNormalizationCache.Register(clip, clip.frequency, prefix, read.Volume, read.Group,
+                            bodySeconds, read.MeasureBody && bodySeconds > 0f ? "measured" : "default", key);
+                    }
+                    return;
+                }
+            }
+            NotePath(clip, "playback", " (not readable directly)");
+            AddOneShotJob(clip, read.Volume, read.Group, read.MeasureBody, StreamKey(clip), consultCache: true);
+        }
+
+        /// <summary>
+        /// The decoded samples of a clip decompressed in memory, as stereo, and
+        /// their hash. Accepted only when they hold a real signal: not silent and
+        /// not a constant.
+        /// </summary>
+        internal static bool TryReadClip(AudioClip clip, out float[] stereo, out ulong hash)
+        {
+            stereo = null;
+            hash = 0;
+            int channels = clip.channels;
+            int frames = clip.samples;
+            if (channels <= 0 || frames <= 0 || (long)channels * frames > 64L * 1024 * 1024) return false;
+            var data = new float[frames * channels];
+            bool read;
+            try { read = clip.GetData(data, 0); }
+            catch (Exception) { return false; }
+            if (!read || !DirectLevelMeter.IsSignal(data)) return false;
+            hash = LevelCache.Fnv1a(data, data.Length);
+            stereo = DirectLevelMeter.ToStereo(data, channels);
+            return true;
+        }
+
+        private static readonly HashSet<int> ReportedPaths = new HashSet<int>();
+
+        /// <summary>Where one clip's measurement came from, once per clip: cache, getdata or playback.</summary>
+        private static void NotePath(AudioClip clip, string path, string detail = null)
+        {
+            if (clip == null || !ReportedPaths.Add(clip.GetInstanceID())) return;
+            if (DetailedDiagnostics.TryBegin(DiagnosticEventKind.AutomaticWarmup, out DiagnosticReservation reservation))
+                DetailedDiagnostics.Commit(reservation, $"level measure clip={clip.name} pcm={path}{detail}");
         }
 
         private static AudioClip[] CloseClips(SoundBank bank, int environment)
@@ -451,9 +857,59 @@ namespace GunsAreLoud.Client.Audio
                     $"automatic prewarm clip={job.Clip?.name} attempt={job.Attempts}/2: {reason}");
         }
 
+        private static long BankFingerprint(WeaponSoundPlayer weapon)
+        {
+            long hash = 17;
+            foreach (SoundBank bank in new[] { weapon.Body, weapon.BodySilenced, weapon.Tail,
+                weapon.TailSilenced, weapon.Doublet, weapon.DoubletSilenced })
+                hash = hash * 31 + (bank != null ? bank.GetInstanceID() : 0);
+            return hash == 0 ? 1 : hash;
+        }
+
+        // After the measurements were forgotten: every job, finished or not, is
+        // dropped and the held weapon is planned again from its banks.
+        private void DropAllWork()
+        {
+            StopWorkers();
+            ReleaseUnfinishedJobs();
+            _jobs.Clear();
+            _directReads.Clear();
+            _pending.Clear();
+            _recipes.Clear();
+            _plannedBodies.Clear();
+            _bankFingerprint = 0;
+            _nextDiscovery = 0f;
+            if (DetailedDiagnostics.TryBegin(DiagnosticEventKind.AutomaticWarmup, out DiagnosticReservation reservation))
+                DetailedDiagnostics.Commit(reservation, $"warmup measurements reset on {_weapon?.name}: planned again");
+        }
+
+        private void DropWorkForReplacedBanks()
+        {
+            StopWorkers();
+            ReleaseUnfinishedJobs();
+            _directReads.Clear();
+            _pending.Clear();
+            _recipes.Clear();
+            _plannedBodies.Clear();
+            if (DetailedDiagnostics.TryBegin(DiagnosticEventKind.AutomaticWarmup, out DiagnosticReservation reservation))
+                DetailedDiagnostics.Commit(reservation,
+                    $"warmup banks replaced on {_weapon?.name}: unfinished work for the old banks dropped");
+        }
+
         private void StopWorkers()
         {
-            foreach (Worker worker in _workers) worker?.Stop(cancelled: true);
+            foreach (Worker worker in _workers)
+            {
+                if (worker == null) continue;
+                Job job = worker.Job;
+                // A one-shot cut off while only its peak histogram was left has
+                // published its prefix but not its whole direct measure: it is
+                // decoded again from the start.
+                bool remeasure = job != null && job.PrefixDone && job.MeasureDirect;
+                if (remeasure) { job.Ready = false; job.PrefixDone = false; }
+                worker.Stop(cancelled: true);
+                if (remeasure && !_pending.Contains(job)) _pending.Add(job);
+            }
         }
 
         private void OnDisable()
@@ -462,12 +918,14 @@ namespace GunsAreLoud.Client.Audio
             // Release raw scratch PCM; immutable published clips remain reusable.
             // A job that is already decoded keeps its buffer: a weapon swap back
             // and forth used to throw away finished work and decode it again.
+            _directReads.Clear();
             ReleaseUnfinishedJobs();
             _pending.Clear();
             _recipes.Clear();
             _plannedBodies.Clear();
             _failed = false;
             _nextDiscovery = 0f;
+            _bankFingerprint = 0;
         }
 
         private sealed class Recipe
@@ -475,6 +933,7 @@ namespace GunsAreLoud.Client.Audio
             internal Job Body;
             internal Job Tail;
             internal float TailGain;
+            internal string EventKey;
         }
 
         private readonly struct JobKey : IEquatable<JobKey>
@@ -502,6 +961,7 @@ namespace GunsAreLoud.Client.Audio
             internal int Frames;
             internal bool Body;
             internal bool Normalize;
+            internal bool MeasureBody;
             internal float ReferenceVolume;
             internal int Group;
             internal bool Ready;
@@ -509,6 +969,17 @@ namespace GunsAreLoud.Client.Audio
             internal int Attempts;
             internal SilentPcmBuffer Buffer;
             internal int RecipeConsumers;
+            // The persistent cache entry this job's measurements go to.
+            internal string CacheKey;
+            // A one-shot whose direct level is measured from this decode: the
+            // attack window from the prefix, the peak over the whole clip.
+            internal bool MeasureDirect;
+            // A loop beat without a tail: the beat is the whole event.
+            internal bool MeasureDirectBeat;
+            internal int HistogramFrames;
+            internal bool PrefixDone;
+            internal float AttackWindowDb = float.NaN;
+            internal string PrefixHash;
         }
 
         private sealed class Worker
@@ -516,6 +987,7 @@ namespace GunsAreLoud.Client.Audio
             private readonly AudioSource _source;
             private readonly SilentWeaponDecoder _decoder;
             internal Job Job;
+            internal SilentPcmBuffer Buffer;
             internal float Deadline;
 
             internal Worker(Transform parent, int index)
@@ -542,12 +1014,14 @@ namespace GunsAreLoud.Client.Audio
             {
                 job.Attempts++;
                 job.Running = true;
-                job.Buffer = new SilentPcmBuffer(job.Frames);
+                job.Buffer = new SilentPcmBuffer(job.Frames, job.MeasureDirect ? job.HistogramFrames : 0);
+                job.PrefixDone = false;
                 Job = job;
+                Buffer = job.Buffer;
                 _decoder.Arm(job.Buffer);
                 _source.clip = job.Clip;
                 _source.timeSamples = 0;
-                Deadline = Time.unscaledTime + job.Frames / (float)rate + 5f;
+                Deadline = Time.unscaledTime + Math.Max(job.Frames, Buffer.HistogramFrames) / (float)rate + 5f;
                 _source.Play();
             }
 
@@ -559,10 +1033,11 @@ namespace GunsAreLoud.Client.Audio
                 if (Job != null)
                 {
                     Job.Running = false;
-                    if (cancelled) Job.Buffer = null;
+                    if (cancelled && !Job.Ready) Job.Buffer = null;
                     if (cancelled && !Job.Ready) Job.Attempts = Math.Max(0, Job.Attempts - 1);
                 }
                 Job = null;
+                Buffer = null;
             }
         }
     }
@@ -582,9 +1057,16 @@ namespace GunsAreLoud.Client.Audio
     internal sealed class AutomaticWarmupDiscovery : MonoBehaviour
     {
         private WeaponSoundPlayer _attached;
+        private bool _cacheWriteFailureLogged;
+
         private void Update()
         {
             AutomaticWeaponWarmup.ReleaseCachesIfIdle();
+            if (LevelCache.Tick() == false && !_cacheWriteFailureLogged && LevelCache.Store?.LastWriteError != null)
+            {
+                _cacheWriteFailureLogged = true;
+                Plugin.Log?.LogWarning($"level cache not written (retrying later): {LevelCache.Store.LastWriteError}");
+            }
             if (Plugin.ModConfig?.Enabled.Value != true) { _attached = null; return; }
             WeaponSoundPlayer weapon = AudioRuntimeLookup.HeldWeapon;
             if (weapon == null) { _attached = null; return; }

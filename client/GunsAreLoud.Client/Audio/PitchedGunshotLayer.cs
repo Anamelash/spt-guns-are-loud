@@ -114,11 +114,18 @@ namespace GunsAreLoud.Client.Audio
         private float _lastOcclusion;
         private Voice _lastVoice;
 
+        /// <param name="burstIntervalSeconds">For a full report copy that is one
+        /// round of continuous fire (an engine that plays every round as its own
+        /// shot): the fire interval. Later rounds then shorten this copy to the
+        /// configured overlap, as they do for cached automatic copies; 0 leaves
+        /// it whole.</param>
         internal static bool Play(
             SuperSource source,
             LocalGunshotAudioTuning tuning,
             double scheduledStart,
-            float originalDurationSeconds)
+            float originalDurationSeconds,
+            float burstIntervalSeconds = 0f,
+            float directGain = 1f)
         {
             if (source == null ||
                 tuning.DirectBodyGain <= 0.001f)
@@ -137,7 +144,9 @@ namespace GunsAreLoud.Client.Audio
                 default,
                 default,
                 false,
-                detached: OutlivesSourceLease(cachedAutomaticCopy: false, isFullReport: false));
+                detached: OutlivesSourceLease(cachedAutomaticCopy: false, isFullReport: false),
+                burstIntervalSeconds: burstIntervalSeconds,
+                directGain: directGain);
         }
 
         /// <summary>
@@ -190,7 +199,9 @@ namespace GunsAreLoud.Client.Audio
                 true,
                 detached: OutlivesSourceLease(
                     cachedAutomaticCopy: true,
-                    isFullReport: copyA.IsFullReport || copyB.IsFullReport));
+                    isFullReport: copyA.IsFullReport || copyB.IsFullReport),
+                // The copy follows the direct sound of the source it was made from.
+                directGain: LocalGunshotAudioProcessor.CopyGain(source));
         }
 
         internal static float CalculateOriginalDuration(
@@ -315,23 +326,59 @@ namespace GunsAreLoud.Client.Audio
             return Mathf.Clamp(requested, Mathf.Min(MinimumReleaseFadeSeconds, window), window);
         }
 
+        /// <summary>
+        /// The copy's own gain: the body gain, the cartridge weight from the
+        /// round's energy index and the player's layer gain.
+        /// </summary>
+        /// <param name="energyIndex">L_E of the round, dB against the reference cartridge.</param>
+        /// <param name="cartridgeContrastDb">The configured level of an intermediate
+        /// rifle cartridge above 9x19 in the copy.</param>
         internal static float CalculateLayerGain(
             float directBodyGain,
-            float pressureFrequencyHz,
+            float energyIndex,
             float gainDb = 0f,
-            float caliberContrastPercent = 100f)
+            float cartridgeContrastDb = Configuration.ModConfig.DefaultCartridgeContrastDb)
         {
-            // Current exposure model maps intermediate ammo to 99.05 Hz and
-            // 9x19 to 111.65 Hz. Calibrate explicitly in dB: 3 dB difference
-            // at 100%, 6 dB at 200%, instead of the previous 0.86/1.72 dB.
-            // Keep the old heavy-caliber ceiling; add contrast by reducing the
-            // pistol baseline rather than pushing every rifle into clipping.
-            float caliberDb = Mathf.Clamp((99.05f - pressureFrequencyHz) * (3f / 12.6f),
-                -6f, (float)(20.0 * Math.Log10(1.22)));
             float caliberWeight = (float)Math.Pow(10.0,
-                caliberDb * Mathf.Clamp(caliberContrastPercent, 0f, 300f) / 2000.0);
+                CalculateCartridgeContrastDb(energyIndex, cartridgeContrastDb) / 20.0);
             float userGain = CalculateUserGain(gainDb);
             return Mathf.Clamp(directBodyGain, 0f, 0.5f) * 1.25f * caliberWeight * userGain;
+        }
+
+        /// <summary>
+        /// The cartridge weight of the copy in dB: a straight line through 0 at
+        /// the reference cartridge whose slope puts the configured contrast
+        /// between a median 9x19 and a median 5.45x39 round, held between
+        /// <see cref="ShotLevelIndex.ContrastMinimumDb"/> and
+        /// <see cref="ShotLevelIndex.ContrastMaximumDb"/>.
+        /// </summary>
+        internal static float CalculateCartridgeContrastDb(float energyIndex, float cartridgeContrastDb)
+        {
+            if (float.IsNaN(energyIndex) || float.IsInfinity(energyIndex)) energyIndex = 0f;
+            float slope = Mathf.Clamp(cartridgeContrastDb, 0f, 3f * Configuration.ModConfig.CartridgeContrastSpanDb) /
+                ShotLevelIndex.ContrastSpanDb;
+            return Mathf.Clamp(slope * energyIndex, ShotLevelIndex.ContrastMinimumDb, ShotLevelIndex.ContrastMaximumDb);
+        }
+
+        /// <summary>
+        /// The copy plays at the donor's volume times its own gain (cartridge
+        /// weight, player gain, headset damping, occlusion) times the direct level
+        /// correction of the donor. A source volume stops at 1, so whatever the
+        /// product holds beyond that goes into the copy's filter gain (the return
+        /// value) instead of being lost. Below 1 it is exactly the volume and a
+        /// filter gain of 1.
+        /// </summary>
+        internal static float SplitCopyGain(float donorVolume, float layerGain, float directGain, out float volume)
+        {
+            float correction = directGain > 0f && !float.IsInfinity(directGain) ? directGain : 1f;
+            float total = Mathf.Max(0f, donorVolume) * Mathf.Max(0f, layerGain) * correction;
+            if (float.IsNaN(total) || float.IsInfinity(total))
+            {
+                volume = 0f;
+                return 1f;
+            }
+            volume = Mathf.Clamp01(total);
+            return volume > 0f ? total / volume : 1f;
         }
 
         internal static float CalculateUserGain(float gainDb)
@@ -499,7 +546,9 @@ namespace GunsAreLoud.Client.Audio
             CachedAutomaticCopy copyA,
             CachedAutomaticCopy copyB,
             bool cachedAutomaticCopy,
-            bool detached)
+            bool detached,
+            float burstIntervalSeconds = 0f,
+            float directGain = 1f)
         {
             float pitchRatio = CalculatePitchRatio(tuning.PitchedLayerSemitones);
             float donorOcclusion = Mathf.Clamp01(source.OcclusionVolumeFactor);
@@ -514,9 +563,11 @@ namespace GunsAreLoud.Client.Audio
                 Mathf.Max(10f, lowpassHz - 10f));
             float openSourceGain = CalculateLayerGain(
                 tuning.DirectBodyGain,
-                tuning.PressureFrequencyHz,
+                tuning.EnergyIndex,
                 0f,
-                tuning.CaliberContrastPercent);
+                tuning.CartridgeContrastDb);
+            // The copy follows the donor's volume and the direct correction of the
+            // shot (directGain); no other level is taken from the playing engine.
             float sourceGain = CalculateOccludedGain(
                 openSourceGain,
                 donorOcclusion,
@@ -582,6 +633,7 @@ namespace GunsAreLoud.Client.Audio
                 fadePercent,
                 sourceGain,
                 userGain,
+                directGain,
                 scheduledStart,
                 tuning.HeadphonesDamping.TailDbPerSecond,
                 levelA,
@@ -598,10 +650,13 @@ namespace GunsAreLoud.Client.Audio
                     $"low-end normalization voice={voice.DiagnosticId} clip={normalizationClipA?.name ?? normalizationClipB?.name} " +
                     // Reported in the same unit the F12 controls now use.
                     $"amount={tuning.LowEndNormalizationPercent * Configuration.ModConfig.LowEndNormalizationSpanDb / 100f:0.0}dB " +
-                    $"contrast={tuning.CaliberContrastPercent * Configuration.ModConfig.CartridgeContrastSpanDb / 100f:0.0}dB " +
+                    $"contrast={tuning.CartridgeContrastDb:0.0}dB " +
+                    $"L_E={tuning.EnergyIndex:0.0} weight={CalculateCartridgeContrastDb(tuning.EnergyIndex, tuning.CartridgeContrastDb):+0.0;-0.0;0.0}dB " +
                     $"basis={(tuning.NormalizeBass ? "bass180" : "wide")} factorA={levelA.BodyGain:0.000} readyA={readyA} factorB={levelB.BodyGain:0.000} readyB={readyB} " +
                     $"decayGainA={levelA.DecayGain:0.000} decayReadyA={levelA.DecayReady} decayRmsA={levelA.DecayRms:0.00000} " +
                     $"decayTargetA={levelA.DecayTargetRms:0.00000} decayStartA={levelA.DecayStartSeconds * 1000:0}ms decayLimitedA={levelA.DecayLimited} " +
+                    $"bodySourceA={LowEndNormalizationCache.BodySource(normalizationClipA)} " +
+                    $"directGain={directGain:0.000} " +
                     $"decayGainB={levelB.DecayGain:0.000} decayReadyB={levelB.DecayReady} decayRmsB={levelB.DecayRms:0.00000} " +
                     $"decayTargetB={levelB.DecayTargetRms:0.00000} decayStartB={levelB.DecayStartSeconds * 1000:0}ms decayLimitedB={levelB.DecayLimited} " +
                     $"rmsA={levelA.MeasuredRms:0.00000} targetA={levelA.TargetRms:0.00000} limitedA={levelA.Limited} " +
@@ -618,7 +673,7 @@ namespace GunsAreLoud.Client.Audio
             _lastOutputDurationMs = durationSeconds * 1000f;
             _lastTailDurationMs = tailSeconds * 1000f;
             _lastFadePercent = fadePercent;
-            _lastGain = totalGain;
+            _lastGain = totalGain * directGain;
             _lastOcclusion = 1f - donorOcclusion;
             _lastVoice = voice;
             voice.BindOwner(detached ? 0 : source.GetInstanceID());
@@ -628,6 +683,15 @@ namespace GunsAreLoud.Client.Audio
                 ReleasePredecessors(
                     voice,
                     tuning.PitchedLayerLoopBeatSeconds,
+                    tuning.AutomaticReportOverlapShots,
+                    fadePercent);
+            }
+            else if (!cachedAutomaticCopy && burstIntervalSeconds > 0.001f)
+            {
+                voice.MarkBurstCopy();
+                ReleasePredecessors(
+                    voice,
+                    burstIntervalSeconds,
                     tuning.AutomaticReportOverlapShots,
                     fadePercent);
             }
@@ -788,6 +852,7 @@ namespace GunsAreLoud.Client.Audio
                 float fadePercent,
                 float sourceGain,
                 float userGain,
+                float directGain,
                 double scheduledStart,
                 float headphoneTailDbPerSecond,
                 LowEndNormalizationResult calibrationA,
@@ -826,6 +891,7 @@ namespace GunsAreLoud.Client.Audio
                     fadePercent,
                     sourceGain,
                     userGain,
+                    directGain,
                     start,
                     _scheduledEnd,
                     _measureLevels,
@@ -849,6 +915,7 @@ namespace GunsAreLoud.Client.Audio
                     fadePercent,
                     sourceGain,
                     userGain,
+                    directGain,
                     start,
                     _scheduledEnd,
                     _measureLevels,
@@ -965,6 +1032,7 @@ namespace GunsAreLoud.Client.Audio
                 float fadePercent,
                 float sourceGain,
                 float userGain,
+                float directGain,
                 double scheduledStart,
                 double scheduledEnd,
                 bool measureLevels,
@@ -990,7 +1058,10 @@ namespace GunsAreLoud.Client.Audio
                     cachedAutomaticCopy && !nativePitch ? pitchRatio : donor.pitch * pitchRatio,
                     0.1f,
                     3f);
-                target.volume = Mathf.Clamp01(donor.volume * sourceGain);
+                // One product for every part of the copy's level, split once
+                // between the source volume and the filter gain.
+                float copyFilterGain = SplitCopyGain(donor.volume, sourceGain * userGain, directGain, out float copyVolume);
+                target.volume = copyVolume;
                 target.loop = false;
                 target.timeSamples = 0;
 
@@ -1011,7 +1082,7 @@ namespace GunsAreLoud.Client.Audio
                 envelope.Configure(
                     durationSeconds,
                     fadePercent,
-                    userGain,
+                    copyFilterGain,
                     startImmediately: cachedAutomaticCopy,
                     sampleRate: AudioRuntimeState.OutputSampleRate,
                     measureLevels: measureLevels,

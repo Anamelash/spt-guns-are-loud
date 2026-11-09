@@ -9,11 +9,22 @@ using UnityEngine;
 
 namespace GunsAreLoud.Client.Patches
 {
+    // Sound Engine Backport replaces FireBullet with a prefix that returns
+    // false, which skips every prefix after it. This one has to run first
+    // whatever order the plugins were loaded in: it measures the shot and opens
+    // the scope in which the shot's own sources are recognised.
     [HarmonyPatch(typeof(WeaponSoundPlayer), nameof(WeaponSoundPlayer.FireBullet))]
+    [HarmonyBefore(Integrations.Seb.SebIds.ClientGuid, Integrations.Seb.SebIds.ReleaseGuid)]
+    [HarmonyPriority(Priority.First)]
     internal static class FireBulletPatch
     {
         private static readonly ConditionalWeakTable<WeaponSoundPlayer, LocalGunshotAudioTuningBox> LastAutomaticTuning =
             new ConditionalWeakTable<WeaponSoundPlayer, LocalGunshotAudioTuningBox>();
+
+        [ThreadStatic]
+        private static bool _prefixRan;
+
+        private static bool _prefixSkipLogged;
 
         private static void Prefix(
             WeaponSoundPlayer __instance,
@@ -23,8 +34,24 @@ namespace GunsAreLoud.Client.Patches
             float pitchMult,
             out ShotProcessingState __state)
         {
+            _prefixRan = true;
             using (PerformanceTrace.Measure(PerformanceArea.HookFireBullet))
                 __state = PrepareShot(__instance, ammo, shotPosition, shotDirection, pitchMult);
+        }
+
+        /// <summary>
+        /// A prefix of another mod that runs before this one and returns false
+        /// takes the shot away from this mod: no hearing exposure, no added
+        /// copy. Said once per session, and only for the local player's shot.
+        /// </summary>
+        private static void NotePrefixSkipped(WeaponSoundPlayer soundPlayer)
+        {
+            if (_prefixSkipLogged || Plugin.ModConfig?.Enabled.Value != true ||
+                !ShotDescriptorFactory.TryGetLocalBridge(soundPlayer, out _))
+                return;
+            _prefixSkipLogged = true;
+            Plugin.Log?.LogWarning(
+                "FireBullet prefix skipped by another mod: the local shot reached no hearing exposure or added copy");
         }
 
         private static ShotProcessingState PrepareShot(
@@ -72,6 +99,16 @@ namespace GunsAreLoud.Client.Patches
                 0.5f);
             float pressureFrequencyHz = DirectLoudnessModel.CalculatePressureFrequencyHz(exposure, tuning);
             directBodyGain = DirectLoudnessModel.CalculatePitchedBodyGain(descriptor, tuning);
+            // The level the direct sound of this shot should play at. The engine's
+            // own gunshot trim stays on top: the correction must not undo it.
+            float directTargetDb = DirectLevelModel.TargetDb(
+                tuning.DirectLevelTarget,
+                ShotLevelIndex.Compute(descriptor, tuning.MuzzleDeviceIndexPerLoudness),
+                descriptor.AmmoCaliber,
+                descriptor.IsIndoor,
+                Engine.SoundEngine.Shots.UserGainDb,
+                out CaliberClass directClass,
+                out bool directClassFromEnergy);
             var audioTuning = new LocalGunshotAudioTuning(
                 directBoostDb,
                 directBodyGain,
@@ -86,7 +123,7 @@ namespace GunsAreLoud.Client.Patches
                 tuning.PitchedLayerOcclusion,
                 tuning.PitchedLayerOccludedLowpassHz,
                 __instance.IsAutoWeapon
-                    ? __instance.BeatLn / Mathf.Clamp(pitchMult, 0.965f, 1.045f)
+                    ? Engine.SoundEngine.Shots.LoopBeatSeconds(__instance, pitchMult)
                     : 0f,
                 descriptor.IsIndoor && tuning.IndoorRoomStrength > 0.001f,
                 Mathf.Clamp(tuning.IndoorRoomStrength, 0f, 2f),
@@ -99,7 +136,12 @@ namespace GunsAreLoud.Client.Patches
                 headphonesDamping: default,
                 normalizeBass: descriptor.WeaponCategory == WeaponCategory.Pistol && !__instance.IsAutoWeapon,
                 automaticReportOverlapShots: tuning.AutomaticReportOverlapShots,
-                automaticLateToleranceScale: tuning.AutomaticLateToleranceScale);
+                automaticLateToleranceScale: tuning.AutomaticLateToleranceScale,
+                directTargetDb: directTargetDb,
+                directStrength: DirectLevelModel.Strength(tuning.DirectLevelNormalizationDb),
+                directCopyHeadroomDb: tuning.CopyHeadroomDb,
+                energyIndex: exposure.EnergyIndex,
+                directDensityDb: tuning.ShotDensityDb);
 
             state = new ShotProcessingState
             {
@@ -109,7 +151,9 @@ namespace GunsAreLoud.Client.Patches
                 DirectBoostDb = directBoostDb,
                 DirectBodyGain = directBodyGain,
                 AudioTuning = audioTuning,
-                DiagnosticShot = diagnosticShot
+                DiagnosticShot = diagnosticShot,
+                DirectClass = directClass,
+                DirectClassFromEnergy = directClassFromEnergy
             };
 
             if (__instance.IsAutoWeapon)
@@ -121,7 +165,8 @@ namespace GunsAreLoud.Client.Patches
             }
 
             DirectGunshotAudioPatch.BeginLocalShot(
-                audioTuning, state.AudioContext, diagnosticShot);
+                audioTuning, state.AudioContext, diagnosticShot,
+                __instance, descriptor.ContinuousFireIntervalSeconds);
             return state;
         }
 
@@ -148,13 +193,20 @@ namespace GunsAreLoud.Client.Patches
         private static void Postfix(WeaponSoundPlayer __instance, ShotProcessingState __state)
         {
             long trace = PerformanceTrace.Begin();
+            bool prefixRan = _prefixRan;
+            _prefixRan = false;
+            if (!prefixRan) NotePrefixSkipped(__instance);
+            DirectLevelDecision direct = DirectGunshotAudioPatch.ShotDirect;
             int tunedAudioSamples = DirectGunshotAudioPatch.EndLocalShot();
             if (__state != null)
             {
-                if (tunedAudioSamples == 0 && TryPlayAutomaticBeat(__instance, __state.AudioTuning, __state.AudioContext))
+                if (tunedAudioSamples == 0 && TryPlayAutomaticBeat(__instance, __state.AudioTuning, __state.AudioContext,
+                    out DirectLevelDecision continued))
                 {
                     tunedAudioSamples = 1;
+                    direct = continued;
                 }
+                __state.Direct = direct;
                 __state.TunedAudioSamples = tunedAudioSamples;
                 Plugin.Runtime?.HandleShot(__state);
             }
@@ -165,8 +217,10 @@ namespace GunsAreLoud.Client.Patches
         private static bool TryPlayAutomaticBeat(
             WeaponSoundPlayer soundPlayer,
             LocalGunshotAudioTuning tuning,
-            AutomaticShotContext context)
+            AutomaticShotContext context,
+            out DirectLevelDecision direct)
         {
+            direct = default;
             if (soundPlayer == null ||
                 !soundPlayer.IsAutoWeapon ||
                 tuning.PitchedLayerLoopBeatSeconds <= 0.001f ||
@@ -225,6 +279,9 @@ namespace GunsAreLoud.Client.Patches
                 }
                 if (played)
                 {
+                    // A later round of a loop plays on with the correction its
+                    // first round put on the source.
+                    direct = GalSourceBinding.Find(source)?.Direct ?? default;
                     return true;
                 }
             }
@@ -234,6 +291,7 @@ namespace GunsAreLoud.Client.Patches
 
         private static Exception Finalizer(Exception __exception)
         {
+            _prefixRan = false;
             DirectGunshotAudioPatch.EndLocalShot();
             return __exception;
         }
@@ -269,6 +327,8 @@ namespace GunsAreLoud.Client.Patches
     /// real weapon tail uses the same pitched path as a pistol one-shot.
     /// </summary>
     [HarmonyPatch(typeof(WeaponSoundPlayer), nameof(WeaponSoundPlayer.StopFiringLoop))]
+    [HarmonyBefore(Integrations.Seb.SebIds.ClientGuid, Integrations.Seb.SebIds.ReleaseGuid)]
+    [HarmonyPriority(Priority.First)]
     internal static class StopFiringLoopPatch
     {
         private static void Prefix(WeaponSoundPlayer __instance, out bool __state)
@@ -352,14 +412,32 @@ namespace GunsAreLoud.Client.Patches
         [ThreadStatic]
         private static DiagnosticShotToken _diagnosticShot;
 
+        // Only FireBullet sets these: the weapon whose shot this scope is, and
+        // its continuous-fire interval, for an engine that plays the shot itself.
+        [ThreadStatic]
+        private static WeaponSoundPlayer _soundPlayer;
+
+        [ThreadStatic]
+        private static float _continuousFireIntervalSeconds;
+
+        // The direct level correction of the first sample this scope played, for
+        // the shot line.
+        [ThreadStatic]
+        private static DirectLevelDecision _shotDirect;
+
         internal static void BeginLocalShot(
             LocalGunshotAudioTuning tuning,
             AutomaticShotContext context = null,
-            DiagnosticShotToken diagnosticShot = default)
+            DiagnosticShotToken diagnosticShot = default,
+            WeaponSoundPlayer soundPlayer = null,
+            float continuousFireIntervalSeconds = 0f)
         {
             _context = context;
             _diagnosticShot = diagnosticShot;
             _localShotTuning = tuning;
+            _soundPlayer = soundPlayer;
+            _shotDirect = default;
+            _continuousFireIntervalSeconds = continuousFireIntervalSeconds;
             _registeredSamples = 0;
             _insideLocalShot = true;
         }
@@ -371,8 +449,45 @@ namespace GunsAreLoud.Client.Patches
             _localShotTuning = default;
             _context = null;
             _diagnosticShot = default;
+            _soundPlayer = null;
+            _shotDirect = default;
+            _continuousFireIntervalSeconds = 0f;
             _registeredSamples = 0;
             return registeredSamples;
+        }
+
+        /// <summary>
+        /// The open FireBullet scope, for a source the engine starts itself
+        /// inside it rather than through EFT's queue.
+        /// </summary>
+        internal static bool TryGetShotScope(
+            out LocalGunshotAudioTuning tuning,
+            out AutomaticShotContext context,
+            out DiagnosticShotToken diagnosticShot,
+            out WeaponSoundPlayer soundPlayer,
+            out float continuousFireIntervalSeconds)
+        {
+            tuning = _localShotTuning;
+            context = _context;
+            diagnosticShot = _diagnosticShot;
+            soundPlayer = _soundPlayer;
+            continuousFireIntervalSeconds = _continuousFireIntervalSeconds;
+            return _insideLocalShot && _soundPlayer != null;
+        }
+
+        /// <summary>The direct level correction of this scope's first sample, if one was decided.</summary>
+        internal static DirectLevelDecision ShotDirect => _shotDirect;
+
+        /// <summary>Keeps the first decision of the open scope for the shot line.</summary>
+        internal static void NoteDirectDecision(DirectLevelDecision decision)
+        {
+            if (_insideLocalShot && !_shotDirect.Decided) _shotDirect = decision;
+        }
+
+        /// <summary>One more of this shot's sources carries the mod's processing.</summary>
+        internal static void NoteCapturedSource()
+        {
+            if (_insideLocalShot) _registeredSamples++;
         }
 
         private static void Postfix(SuperBetterAudioQueue __instance)
@@ -385,6 +500,27 @@ namespace GunsAreLoud.Client.Patches
         {
             tuning = _localShotTuning;
             return _insideLocalShot;
+        }
+
+        /// <summary>
+        /// The correction of one queued sample. The source plays Clip1 at
+        /// Balance · Volume and Clip2 at (1 − Balance) · Volume before
+        /// occlusion: the volumes the engine chose, which the correction
+        /// measures against. A release tail reuses the correction its burst's
+        /// body was given; the tail's filing under a body is the fallback for a
+        /// tail without one.
+        /// </summary>
+        private static DirectLevelDecision DecideDirect(SuperAudioSample sample, LocalGunshotAudioTuning tuning,
+            AutomaticShotContext context)
+        {
+            AutomaticBurstRouting routing = context?.Routing;
+            bool tail = DirectLevelStore.IsTail(sample.Clip1) || DirectLevelStore.IsTail(sample.Clip2);
+            if (tail && routing != null && routing.BodyDirect.Decided) return routing.BodyDirect;
+            float balance = Mathf.Clamp01(sample.Balance);
+            DirectLevelDecision direct = DirectLevel.Decide(tuning,
+                sample.Clip1, balance * sample.Volume, sample.Clip2, (1f - balance) * sample.Volume);
+            if (!tail && routing != null) routing.BodyDirect = direct;
+            return direct;
         }
 
         internal static void RegisterLastQueuedSample(SuperBetterAudioQueue queue)
@@ -413,8 +549,10 @@ namespace GunsAreLoud.Client.Patches
                 return;
             }
 
+            DirectLevelDecision direct = DecideDirect(lastSample, _localShotTuning, _context);
+            NoteDirectDecision(direct);
             LocalGunshotSampleRegistry.Register(
-                lastSample, _localShotTuning, _context, _diagnosticShot);
+                lastSample, _localShotTuning, _context, _diagnosticShot, _continuousFireIntervalSeconds, direct);
             _registeredSamples++;
         }
     }
@@ -430,7 +568,8 @@ namespace GunsAreLoud.Client.Patches
             __state = null;
             long trace = PerformanceTrace.Begin();
             if (!LocalGunshotSampleRegistry.TryTake(__instance, out LocalGunshotAudioTuning tuning,
-                out AutomaticShotContext context, out DiagnosticShotToken diagnosticShot) ||
+                out AutomaticShotContext context, out DiagnosticShotToken diagnosticShot,
+                out float continuousFireInterval, out DirectLevelDecision direct) ||
                 Plugin.ModConfig?.Enabled.Value != true)
             {
                 LocalGunshotAudioProcessor.Bypass(source);
@@ -453,6 +592,10 @@ namespace GunsAreLoud.Client.Patches
             bool automaticBodyLoop =
                 __instance.End <= __instance.Start &&
                 tuning.PitchedLayerLoopBeatSeconds > 0.001f;
+            // Before the source starts: the correction is in place for the first
+            // sample of the shot and stays until the source plays another sound,
+            // so a looped body keeps it for every round.
+            LocalGunshotAudioProcessor.ApplyDirectGain(source, direct);
             bool roomRouteAvailable = LocalGunshotAudioProcessor.Apply(
                 source, tuning, automaticBodyLoop, __instance.Start);
             if (automaticBodyLoop)
@@ -478,13 +621,18 @@ namespace GunsAreLoud.Client.Patches
                 __instance.Clip1,
                 __instance.Clip2,
                 context,
-                diagnosticShot);
+                diagnosticShot,
+                // A whole-shot sample (End after Start) queued by continuous
+                // fire: later rounds shorten its copy to the overlap window.
+                LocalGunshotAudioTuningBox.BurstIntervalForSample(
+                    __instance.End > __instance.Start, continuousFireInterval));
             if (DetailedDiagnostics.IsActive(diagnosticShot))
             {
                 DetailedDiagnostics.Commit(
                     diagnosticShot,
                     DiagnosticEventKind.AudioApply,
                     $"audio apply clip={clipName} source={source.GetType().Name} " +
+                    $"burst={__state.BurstIntervalSeconds * 1000f:0}ms " +
                     $"impactTarget={tuning.DirectBoostDb:0.0}dB " +
                     $"autoRoute={tuning.AutomaticPitchedRoute} " +
                     $"pitchDown={tuning.PitchedLayerSemitones:0.0}st " +
@@ -494,6 +642,7 @@ namespace GunsAreLoud.Client.Patches
                     $"pitchGain={tuning.PitchedLayerGainDb:+0.0;-0.0;0.0}dB " +
                     $"pitchOcclusion={tuning.PitchedLayerOcclusion} " +
                     $"automaticBodyLoop={automaticBodyLoop} " +
+                    direct.Describe(Plugin.ModConfig?.DirectLevelTarget.Value.ToString() ?? "none") + " " +
                     $"originalDuration={originalDurationSeconds * 1000f:0}ms " +
                     $"indoorRoom={tuning.ApplyIndoorRoom} " +
                     $"roomMix={tuning.IndoorRoomMix:0.00} " +
@@ -524,6 +673,7 @@ namespace GunsAreLoud.Client.Patches
             GalSourceBinding binding = GalSourceBinding.Find(source);
             AutomaticPitchedGunshotFilter pitched = binding?.PitchedFilter(donor);
             AutomaticBeatCapture capture = binding?.Capture(donor);
+            DirectLevelGainFilter direct = binding?.DirectFilter(donor);
             return
                 $"donorVolume={donor.volume:0.000} donorMute={donor.mute} " +
                 $"donorGroup={donor.outputAudioMixerGroup?.name ?? "none"} " +
@@ -531,7 +681,8 @@ namespace GunsAreLoud.Client.Patches
                 $"donorBypassListener={donor.bypassListenerEffects} " +
                 $"donorBypassReverb={donor.bypassReverbZones} " +
                 $"onDonor=pitched:{Attachment(pitched)} " +
-                $"capture:{Attachment(capture)}";
+                $"capture:{Attachment(capture)} " +
+                $"direct:{Attachment(direct)}";
         }
 
         private static string Attachment(Behaviour component) =>
@@ -576,7 +727,9 @@ namespace GunsAreLoud.Client.Patches
                         __state.Source,
                         __state.Tuning,
                         __state.ScheduledStart,
-                        __state.OriginalDurationSeconds);
+                        __state.OriginalDurationSeconds,
+                        __state.BurstIntervalSeconds,
+                        directGain: LocalGunshotAudioProcessor.CopyGain(__state.Source));
                 }
                 else if (DetailedDiagnostics.IsActive(__state.DiagnosticShot))
                 {
@@ -622,6 +775,7 @@ namespace GunsAreLoud.Client.Patches
         internal readonly AudioClip ClipB;
         internal readonly AutomaticShotContext Context;
         internal readonly DiagnosticShotToken DiagnosticShot;
+        internal readonly float BurstIntervalSeconds;
 
         internal LocalGunshotPlaybackState(
             SuperSource source,
@@ -633,8 +787,10 @@ namespace GunsAreLoud.Client.Patches
             AudioClip clipA,
             AudioClip clipB,
             AutomaticShotContext context,
-            DiagnosticShotToken diagnosticShot)
+            DiagnosticShotToken diagnosticShot,
+            float burstIntervalSeconds = 0f)
         {
+            BurstIntervalSeconds = burstIntervalSeconds;
             Source = source;
             ClipName = clipName;
             ScheduledStart = scheduledStart;

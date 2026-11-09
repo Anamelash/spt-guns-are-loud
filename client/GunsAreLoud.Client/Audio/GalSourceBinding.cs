@@ -21,13 +21,18 @@ namespace GunsAreLoud.Client.Audio
     {
         private const int PitchedBit = 2;
         private const int CaptureBit = 4;
+        private const int DirectBit = 8;
         private const int BeatTimelineBit = 1;
 
-        private readonly AudioSource[] _channels = new AudioSource[2];
+        // source1, source2 and, on a ReverbSuperSource, its two wet room copies.
+        private const int Channels = 4;
+
+        private readonly AudioSource[] _channels = new AudioSource[Channels];
         private readonly AutomaticPitchedGunshotFilter[] _pitchedFilters =
-            new AutomaticPitchedGunshotFilter[2];
-        private readonly AutomaticBeatCapture[] _captures = new AutomaticBeatCapture[2];
-        private readonly int[] _resolved = new int[2];
+            new AutomaticPitchedGunshotFilter[Channels];
+        private readonly AutomaticBeatCapture[] _captures = new AutomaticBeatCapture[Channels];
+        private readonly DirectLevelGainFilter[] _directFilters = new DirectLevelGainFilter[Channels];
+        private readonly int[] _resolved = new int[Channels];
         private AutomaticBeatTimeline _beatTimeline;
         private int _resolvedTimelines;
         private bool _armed;
@@ -50,6 +55,9 @@ namespace GunsAreLoud.Client.Audio
         }
 
         internal bool Armed => _armed;
+
+        /// <summary>The direct level correction this source carries for its current shot.</summary>
+        internal DirectLevelDecision Direct { get; set; }
 
         private void Awake() => GalSourceCensus.Created(GalComponentKind.SourceBinding);
 
@@ -88,6 +96,7 @@ namespace GunsAreLoud.Client.Audio
             {
                 filter = channel.gameObject.AddComponent<AutomaticPitchedGunshotFilter>();
                 _pitchedFilters[Slot(channel)] = filter;
+                KeepDirectFilterLast(channel);
             }
             return filter;
         }
@@ -108,8 +117,48 @@ namespace GunsAreLoud.Client.Audio
             {
                 capture = channel.gameObject.AddComponent<AutomaticBeatCapture>();
                 _captures[Slot(channel)] = capture;
+                KeepDirectFilterLast(channel);
             }
             return capture;
+        }
+
+        internal DirectLevelGainFilter DirectFilter(AudioSource channel)
+        {
+            int slot = Slot(channel);
+            if (slot < 0) return null;
+            if (!Resolve(slot, DirectBit, _directFilters[slot]))
+                _directFilters[slot] = channel.GetComponent<DirectLevelGainFilter>();
+            return _directFilters[slot];
+        }
+
+        internal DirectLevelGainFilter EnsureDirectFilter(AudioSource channel)
+        {
+            DirectLevelGainFilter filter = DirectFilter(channel);
+            if (filter == null)
+            {
+                filter = channel.gameObject.AddComponent<DirectLevelGainFilter>();
+                _directFilters[Slot(channel)] = filter;
+            }
+            return filter;
+        }
+
+        // Unity runs a GameObject's audio filters in the order they were added.
+        // The direct level gain must come after the beat capture, which caches
+        // the recording for the copy, and after the in-source pitched route,
+        // whose copy must follow the direct sound: a filter added later than
+        // the gain moves the gain behind it, once per pooled channel.
+        private void KeepDirectFilterLast(AudioSource channel)
+        {
+            DirectLevelGainFilter old = DirectFilter(channel);
+            if (old == null) return;
+            float gain = old.Gain;
+            bool enabled = old.enabled;
+            old.enabled = false;
+            Destroy(old);
+            DirectLevelGainFilter moved = channel.gameObject.AddComponent<DirectLevelGainFilter>();
+            moved.SetGain(gain);
+            moved.enabled = enabled;
+            _directFilters[Slot(channel)] = moved;
         }
 
         internal AutomaticBeatTimeline BeatTimeline()
@@ -151,18 +200,22 @@ namespace GunsAreLoud.Client.Audio
             return false;
         }
 
-        // source1 and source2 keep their identity for the life of a pooled source.
+        // The channels keep their identity for the life of a pooled source.
         // Rebinding is a safety net for an unexpected re-issue, not a normal path.
         private int Slot(AudioSource channel)
         {
             if (channel == null) return -1;
-            if (ReferenceEquals(_channels[0], channel)) return 0;
-            if (ReferenceEquals(_channels[1], channel)) return 1;
-            int slot = ReferenceEquals(_channels[0], null) ? 0 :
-                ReferenceEquals(_channels[1], null) ? 1 : 0;
+            int slot = -1;
+            for (int index = 0; index < Channels; index++)
+            {
+                if (ReferenceEquals(_channels[index], channel)) return index;
+                if (slot < 0 && ReferenceEquals(_channels[index], null)) slot = index;
+            }
+            if (slot < 0) slot = 0;
             _channels[slot] = channel;
             _pitchedFilters[slot] = null;
             _captures[slot] = null;
+            _directFilters[slot] = null;
             _resolved[slot] = 0;
             return slot;
         }

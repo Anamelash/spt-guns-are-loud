@@ -86,5 +86,32 @@ namespace GunsAreLoud.Client.Audio
             new ContrastRouteSpec("World/GAL Passive/Occlusion/UpperOccluded", "GAL_ContrastRoute50"),
             new ContrastRouteSpec("World/GAL Passive/Occlusion/SimpleOccluded", "GAL_ContrastRoute51")
         };
+
+        /// <summary>
+        /// Groups only Sound Engine Backport's live mixer has. In the stock
+        /// mixer bullet impacts play through CommonSounds and room tones,
+        /// cutscene effects and distant firefights through the ambient groups,
+        /// all attenuated; the same sounds keep that treatment here.
+        /// </summary>
+        internal static readonly ContrastRouteSpec[] LiveOnlyRoutes =
+        {
+            new ContrastRouteSpec("World/GAL Passive/Main/Ambient/AmbientIn/AmbientInRoomTone", "GAL_ContrastRoute52"),
+            new ContrastRouteSpec("World/GAL Passive/Main/Ambient/AmbCutsceneCommonEffects", "GAL_ContrastRoute53"),
+            new ContrastRouteSpec("World/GAL Passive/Main/SFXBypass/AmbFirefight", "GAL_ContrastRoute54"),
+            new ContrastRouteSpec("World/GAL Passive/Guns/Impacts", "GAL_ContrastRoute55")
+        };
+
+        /// <summary>The routes of the variant built on Sound Engine Backport's live mixer.</summary>
+        internal static readonly ContrastRouteSpec[] LiveRoutes = Concat(Routes, LiveOnlyRoutes);
+
+        internal static ContrastRouteSpec[] For(bool live) => live ? LiveRoutes : Routes;
+
+        private static ContrastRouteSpec[] Concat(ContrastRouteSpec[] first, ContrastRouteSpec[] second)
+        {
+            var all = new ContrastRouteSpec[first.Length + second.Length];
+            Array.Copy(first, all, first.Length);
+            Array.Copy(second, 0, all, first.Length, second.Length);
+            return all;
+        }
     }
 }

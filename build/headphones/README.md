@@ -1,9 +1,10 @@
-> Current archive installation uses the included BepInEx preloader and compiled DSP, without game-file patches. The loader requires the exact supported UnityPlayer hash from SPT 4.1.5. Metadata registration instructions below describe the legacy development workflow only.
+﻿> Current archive installation uses the included BepInEx preloader and compiled DSP, without game-file patches. The loader requires the exact supported UnityPlayer hash from SPT 4.1.5. Metadata registration instructions below describe the legacy development workflow only.
 
 # Headphone mixer generator
 
-Use Unity 2022.3.43f1. Create a minimal project at
-`docs/internal/headphone-model-2026-09-07/mixer-project`, copy the verified
+Use Unity 2022.3.43f1. Create a minimal project in a folder of your own outside
+the repository (the scripts take it as `-MixerProject`, or from the
+`GAL_MIXER_PROJECT` environment variable), copy the verified
 original mixer to `Assets/Validation/VanillaMasterMixer.mixer`, and copy
 `MixerRouteGenerator.cs`, `GunshotContrastMixerRouteTable.cs`,
 `GunshotContrastMixerRouter.cs`, `MixerContrastRuntimeValidation.cs` and
@@ -51,6 +52,49 @@ other than 20 parameters, which an older DLL would give.
 
 The generated bundle is a prototype until the offline renderer confirms that
 Vanilla is identical and the fitted passive curve meets its error bound.
+
+## Variant for Sound Engine Backport
+
+Sound Engine Backport (SEB) replaces the master mixer with its own live mixer
+(`live_mastermixer.bundle`). The client installs a second variant built on that
+mixer into SEB's loader slot, so SEB makes it the master. The client accepts it
+only for the SEB bundle whose SHA-256 is `SebIds.SupportedLiveBundleSha256`;
+any other SEB mixer keeps Vanilla headphones.
+
+Export SEB's bundle to an editor mixer with AssetRipper (Export → Unity project)
+and copy `Assets/Resources/Audio/MasterMixer.mixer` (without its `.meta`) to
+`Assets/Validation/LiveMasterMixer.mixer`. Copy the current
+`GunshotContrastMixerRouteTable.cs` with the generator, then run:
+
+```powershell
+& 'C:\Program Files\Unity\Hub\Editor\2022.3.43f1\Editor\Unity.exe' `
+  -batchmode -quit -nographics `
+  -projectPath '<mixer-project>' `
+  -executeMethod GAL.HeadphoneMixerGenerator.BuildLive `
+  -logFile '<log>'
+```
+
+It writes `bundle-live/gal_headphone_mixer_live` and the `live-*.txt`
+manifests. The live mixer calls `NonspatialBypass` `Bypass`; the same exposed
+name `GAL_ElectronicsNonspatialBypassSend` feeds the electronics from it. Its
+contrast table is the stock one plus `AmbientInRoomTone`,
+`AmbCutsceneCommonEffects`, `SFXBypass/AmbFirefight` and `Guns/Impacts`.
+SEB's bypassed Meta XR reflection and World highpass are left as they are.
+
+Validate before embedding:
+
+```powershell
+uv run --with UnityPy python build/headphones/verify_compiled_mixer.py `
+  <seb-live-mixer.json> <bundle-live/gal_headphone_mixer_live> `
+  <live-gunshot-contrast-routes.txt> Bypass 56
+./build/headphones/validate-native.ps1 -Variant Live -Profile sordin -Snapshot Outdoor
+```
+
+`seb-live-mixer.json` is the `AudioMixerController` typetree of SEB's bundle
+dumped with UnityPy. The live render's baseline is SEB's own compiled bundle.
+Then copy the bundle to `client/GunsAreLoud.Client/Assets/gal_headphone_mixer_live`.
+`headphone-mixer-live-contract.txt` lists the 132 exposed parameters and three
+snapshots of SEB's mixer.
 
 `validate-native.ps1 -Profile <sordin|comtac2|cens> -Snapshot <Outdoor|Indoor|Bunker> -Tag <name>`
 also checks the colouring controls. `-PreviousBundle` names the bundle built

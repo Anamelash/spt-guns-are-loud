@@ -189,10 +189,10 @@ namespace GunsAreLoud.Tests
                 { SaveOnConfigSet = false };
             var config = new ModConfig(file);
 
-            // The defaults are the shipped 100% and 200%, in the unit the DSP uses.
+            // The defaults, 12 dB and 3 dB, in the unit the DSP uses.
             TuningSnapshot tuning = config.GetTuning();
             Assert.That(tuning.LowEndNormalizationPercent, Is.EqualTo(100f).Within(0.001f));
-            Assert.That(tuning.CaliberContrastPercent, Is.EqualTo(200f).Within(0.001f));
+            Assert.That(tuning.CaliberContrastPercent, Is.EqualTo(100f).Within(0.001f));
 
             config.LowEndNormalizationDb.Value = 0f;
             config.CartridgeContrastDb.Value = 9f;

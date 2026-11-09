@@ -43,6 +43,32 @@ namespace GunsAreLoud.Client.Audio
             return instances == 0 ? "ERROR — mixer requested but no native DSP instance" : null;
         }
 
+        /// <summary>
+        /// The headset DSP is off because another mod owns the master mixer:
+        /// a known, intended state, shown in yellow rather than as an error.
+        /// Null when this mod's own mixer route applies.
+        /// </summary>
+        internal static string ForeignMixerStatus(string yieldedTo, HeadphoneRouteFallback fallback, string owner,
+            string reason = null)
+        {
+            if (!string.IsNullOrEmpty(yieldedTo))
+                return "DSP off — " + yieldedTo + " mixer" + (string.IsNullOrEmpty(reason) ? "" : ": " + reason);
+            if (fallback != HeadphoneRouteFallback.ForeignMasterMixer) return null;
+            return "DSP off — " +
+                (string.IsNullOrEmpty(owner) || owner == HeadphoneRouteRuntime.UnknownMixerOwner ? "foreign" : owner) +
+                " mixer";
+        }
+
+        /// <summary>"Sound Engine Backport" → "SEB": short enough for the status line.</summary>
+        internal static string Initials(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "";
+            var text = new System.Text.StringBuilder();
+            foreach (string word in name.Split(' '))
+                if (word.Length > 0 && char.IsLetter(word[0])) text.Append(char.ToUpperInvariant(word[0]));
+            return text.Length > 1 ? text.ToString() : name;
+        }
+
         internal static void Draw(ConfigEntryBase unused)
         {
             float now = Time.realtimeSinceStartup;
@@ -56,7 +82,8 @@ namespace GunsAreLoud.Client.Audio
             try
             {
                 GUI.contentColor = _text == "DSP error" ? Color.red :
-                    _text == "DSP active" || _text == "DSP ready" ? Color.green : Color.yellow;
+                    _text.StartsWith("DSP active", StringComparison.Ordinal) ||
+                    _text.StartsWith("DSP ready", StringComparison.Ordinal) ? Color.green : Color.yellow;
                 GUILayout.Label(_text, _style);
             }
             finally { GUI.contentColor = before; }
@@ -77,6 +104,13 @@ namespace GunsAreLoud.Client.Audio
                 var route = runtime != null ? runtime.Status : default;
                 string reason = "route runtime unavailable";
                 bool verified = runtime != null && runtime.VerifyConnection(out reason);
+                string foreign = ForeignMixerStatus(HeadphoneMixerAsset.YieldedTo, route.Fallback,
+                    HeadphoneRouteRuntime.ForeignMixerOwner(), HeadphoneMixerAsset.YieldReason);
+                if (foreign != null)
+                {
+                    _text = foreign;
+                    return;
+                }
                 _connected = Plugin.ModConfig?.Enabled.Value == true && abi && instances == 1 && advancing && verified &&
                     route.Effective == HeadphoneMode.Realistic && route.Fallback == HeadphoneRouteFallback.None;
                 string initialization = InitializationStatus(abi, registered, HeadphoneMixerAsset.HookInstalled,
@@ -92,7 +126,8 @@ namespace GunsAreLoud.Client.Audio
                     (HeadphoneMixerAsset.LoadAttempted && (instances != 1 || !counter || routeError));
                 _text = error ? "DSP error" :
                     !HeadphoneMixerAsset.LoadAttempted || transition ? "DSP loading" :
-                    _connected && initialization == null ? "DSP active" : "DSP ready";
+                    (_connected && initialization == null ? "DSP active" : "DSP ready") +
+                    (HeadphoneMixerAsset.HostVariantActive ? " (" + Initials(Engine.SoundEngine.Mixer.DisplayName) + ")" : "");
             }
             catch (Exception)
             {

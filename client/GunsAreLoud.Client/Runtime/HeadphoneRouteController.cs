@@ -12,7 +12,10 @@ namespace GunsAreLoud.Client.Runtime
         MixerUnavailable,
         IncompleteMixerRoute,
         ProfileFitPending,
-        MixerWriteFailed
+        MixerWriteFailed,
+        // Another mod replaced the master mixer: there is nothing of ours to
+        // route through. A known state, not an error.
+        ForeignMasterMixer
     }
 
     internal readonly struct HeadphoneRouteStatus
@@ -58,10 +61,17 @@ namespace GunsAreLoud.Client.Runtime
         private HeadsetSendLevels _activeSends;
         private float _activeCharacter = 1f;
         private int _generation;
+        private readonly HeadphoneRouteFallback _unavailable;
+        private readonly string _unavailableDetail;
 
-        internal HeadphoneRouteController(IHeadphoneRouteBackend backend)
+        /// <param name="unavailable">Why there is no backend, when there is none.</param>
+        internal HeadphoneRouteController(IHeadphoneRouteBackend backend,
+            HeadphoneRouteFallback unavailable = HeadphoneRouteFallback.MixerUnavailable,
+            string unavailableDetail = "realistic mixer backend unavailable")
         {
             _backend = backend;
+            _unavailable = unavailable;
+            _unavailableDetail = unavailableDetail ?? "";
             _status = NewStatus(HeadphoneMode.Vanilla, HeadphoneMode.Vanilla,
                 "", "", HeadphoneRouteFallback.None, "native EFT route");
         }
@@ -87,7 +97,7 @@ namespace GunsAreLoud.Client.Runtime
 
             if (_backend == null)
                 return Fallback(requested, templateId, profile.ProfileId,
-                    HeadphoneRouteFallback.MixerUnavailable, "realistic mixer backend unavailable");
+                    _unavailable, _unavailableDetail);
 
             // Variants of one headset share a profile but not always a category mix,
             // so a changed send level must reactivate even when the profile is the same.

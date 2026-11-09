@@ -65,8 +65,8 @@ namespace GunsAreLoud.Client.Audio
         /// contrast route table already lists every direct-source parent below
         /// the passive bus; the stock-side path is the same without the bus.
         /// </summary>
-        internal static IEnumerable<string> DefaultDisambiguationPaths() =>
-            GunshotContrastMixerRouteTable.Routes
+        internal static IEnumerable<string> DefaultDisambiguationPaths(ContrastRouteSpec[] routes = null) =>
+            (routes ?? GunshotContrastMixerRouteTable.Routes)
                 .Select(route => route.ParentPath)
                 .Where(path => path.StartsWith(PassiveBusPrefix, StringComparison.Ordinal));
 
@@ -77,7 +77,8 @@ namespace GunsAreLoud.Client.Audio
 
         internal static StockMixerGroupMapResult<TGroup> Build<TGroup>(
             IMixerGroupCatalog<TGroup> stock, IMixerGroupCatalog<TGroup> replacement,
-            IEnumerable<string> disambiguationPaths = null)
+            IEnumerable<string> disambiguationPaths = null,
+            IReadOnlyDictionary<string, string> stockToReplacementNames = null)
         {
             var pairs = new Dictionary<TGroup, TGroup>();
             var skipped = new List<string>();
@@ -122,7 +123,11 @@ namespace GunsAreLoud.Client.Audio
             foreach (KeyValuePair<string, List<TGroup>> entry in stockByName)
             {
                 string name = entry.Key;
-                replacementByName.TryGetValue(name, out List<TGroup> counterparts);
+                // A stock group the replacement carries under another name (Sound
+                // Engine Backport's live mixer calls NonspatialBypass Bypass).
+                string replacementName = stockToReplacementNames != null &&
+                    stockToReplacementNames.TryGetValue(name, out string alias) ? alias : name;
+                replacementByName.TryGetValue(replacementName, out List<TGroup> counterparts);
                 List<TGroup> stockLeft = entry.Value.Where(group => !claimedStock.Contains(group)).ToList();
                 List<TGroup> replacementLeft = (counterparts ?? new List<TGroup>())
                     .Where(group => !claimedReplacement.Contains(group)).ToList();

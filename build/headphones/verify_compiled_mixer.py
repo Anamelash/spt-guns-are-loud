@@ -1,6 +1,6 @@
 """Compare original stock DSP graph with a generated candidate by persistent GUID.
 
-Run with uv run --with UnityPy python ... ORIGINAL_JSON CANDIDATE_BUNDLE ROUTE_MANIFEST.
+Run with uv run --with UnityPy python ... ORIGINAL_JSON CANDIDATE_BUNDLE ROUTE_MANIFEST [BYPASS_GROUP ROUTE_COUNT].
 Checks native compiled DSP data, not only exposed editor properties.
 """
 import json
@@ -14,6 +14,10 @@ env = UnityPy.load(sys.argv[2])
 candidate = next(o.read_typetree()['m_MixerConstant'] for o in env.objects
                  if o.type.name == 'AudioMixerController')
 routes = [line.split('|') for line in Path(sys.argv[3]).read_text().splitlines() if line]
+# Optional: the dry World child that carries non-spatial sound (Bypass in Sound
+# Engine Backport's live mixer) and the number of contrast routes of the variant.
+bypass = sys.argv[4] if len(sys.argv) > 4 else 'NonspatialBypass'
+expected_routes = int(sys.argv[5]) if len(sys.argv) > 5 else 52
 assert all(len(route) == 3 for route in routes), 'Malformed contrast route manifest'
 def guid(g): return tuple(g.values())
 def table(d, key): return {guid(g): i for i,g in enumerate(d[key+'GUIDs'])}
@@ -46,10 +50,16 @@ def normalized_group(d, i):
     g=d['groups'][i]
     return {k: (value(d,v) if k in ('volumeIndex','pitchIndex') else
                 ref(d,'group',v) if k=='parentConstantIndex' else v) for k,v in g.items()}
+# A native plugin effect's type is 1000 + its index in the bundle's own plugin
+# name table, which differs between bundles; compare the plugin by name.
+def plugin_type(d, t):
+    if t < 1000: return t
+    return 'plugin:' + bytes(d['pluginEffectNameBuffer']).split(b'\0')[t - 1000].decode()
 def normalized_effect(d,i):
     e=d['effects'][i]
     return {k: ([value(d,x) for x in v] if k=='parameterIndices' else
                 value(d,v) if k=='wetMixLevelIndex' else
+                plugin_type(d,v) if k=='type' else
                 ref(d,'effect',v) if k in ('sendTargetEffectIndex','prevEffectIndex') else
                 ref(d,'group',v) if k=='groupConstantIndex' else v) for k,v in e.items()}
 errors=[]
@@ -62,7 +72,7 @@ for g,i in old_groups.items():
     if g not in new_groups: errors.append(('missing-group',old_names[i])); continue
     a=normalized_group(original,i); b=normalized_group(candidate,new_groups[g])
     if b['parentConstantIndex']==passive:
-        assert old_names[i] in ('NonspatialBypass','Guns','Main','Occlusion')
+        assert old_names[i] in (bypass,'Guns','Main','Occlusion')
         b['parentConstantIndex']=a['parentConstantIndex']
     if a!=b: errors.append(('group',old_names[i],a,b))
 new_effects=table(candidate,'effect')
@@ -97,7 +107,7 @@ sends = [(i,e) for i,e in enumerate(effects) if e['type']==-3 and e['sendTargetE
 assert len(sends)==12, 'All twelve world category feeds required'
 assert {new_names[e['groupConstantIndex']] for _,e in sends}=={
     'Guns','ClientPlayer','ObservedPlayer','NPC','TechnicalSounds','NatureSounds',
-    'CommonSounds','Ambient','Returns','NonspatialBypass','Voip','Occlusion'}
+    'CommonSounds','Ambient','Returns',bypass,'Voip','Occlusion'}
 for _,send in sends:
     assert set(value(candidate,send['wetMixLevelIndex']).values())=={-80}, 'New send not silent in Vanilla'
 assert set(value(candidate,candidate['groups'][electronics_index]['volumeIndex']).values())=={-80}
@@ -126,7 +136,7 @@ candidate_paths=paths(candidate)
 contrast_indices=[i for i,path in enumerate(candidate_paths)
                   if new_names[i]=='GAL Contrast Input']
 expected_paths={'Master/InGame/'+route[1] for route in routes}
-assert len(routes)==52 and len(expected_paths)==52, 'Expected 52 unique mapped contrast routes'
+assert len(routes)==expected_routes and len(expected_paths)==expected_routes, f'Expected {expected_routes} unique mapped contrast routes'
 assert {candidate_paths[i] for i in contrast_indices}==expected_paths, 'Compiled contrast route map differs from manifest'
 for index in contrast_indices:
     route_effects=[e for e in effects if e['groupConstantIndex']==index]

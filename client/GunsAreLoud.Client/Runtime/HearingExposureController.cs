@@ -75,17 +75,21 @@ namespace GunsAreLoud.Client.Runtime
 
             if (DetailedDiagnostics.IsActive(state.DiagnosticShot))
             {
-                float bodyFrequency = DirectLoudnessModel.CalculatePressureFrequencyHz(result, tuning);
                 float pitchedLayerGain = PitchedGunshotLayer.CalculateLayerGain(
                         state.DirectBodyGain,
-                        bodyFrequency,
+                        result.EnergyIndex,
                         tuning.PitchedLayerGainDb,
-                        tuning.CaliberContrastPercent);
+                        state.AudioTuning.CartridgeContrastDb);
                 DetailedDiagnostics.Commit(
                     state.DiagnosticShot,
                     DiagnosticEventKind.LocalShot,
                     $"shot caliber={shot.AmmoCaliber} class={shot.WeaponClass} " +
-                    $"energy={0.5f * shot.BulletMassGram / 1000f * shot.MuzzleVelocity * shot.MuzzleVelocity:0}J " +
+                    $"bullet={shot.BulletMassGram:0.00}gx{shot.ProjectileCount} " +
+                    $"E={result.EnergyJoules:0}J payload={result.PayloadMassGram:0.00}g v={shot.MuzzleVelocity:0}m/s " +
+                    $"d={result.MuzzleDistance:0.00}m L_E={result.EnergyIndex:0.0}{(result.IndexFallback ? "(fallback)" : string.Empty)} " +
+                    $"L_d={result.DistanceIndex:0.0} L_m={result.DeviceIndex:+0.0;-0.0;0.0} L={result.LevelIndex:0.0} " +
+                    $"severity={result.FinalSeverity:0.000} baseSeverity={result.BaseSeverity:0.000} " +
+                    $"penalty={result.HeadphonesCaliberPenaltyDb:0.0}dB " +
                     $"mods={shot.SummedModLoudness:+#;-#;0} suppressed={shot.IsSuppressed} " +
                     $"indoor={shot.IsIndoor} leftStance={shot.IsLeftStance} " +
                     $"headphones={shot.HeadphonesName} profile={_config.Preset.Value} " +
@@ -99,7 +103,11 @@ namespace GunsAreLoud.Client.Runtime
                     $"directBoost={state.DirectBoostDb:0.0}dB body={state.DirectBodyGain:0.00} " +
                     $"autoRoute={tuning.AutomaticPitchedRoute} masterProbe={masterProbeId} " +
                     $"pitchedLayer={pitchedLayerGain:0.00} " +
-                    $"audioSamples={state.TunedAudioSamples} severity={result.FinalSeverity:0.000} " +
+                    state.Direct.Describe(tuning.DirectLevelTarget.ToString()) + " " +
+                    (tuning.DirectLevelTarget == DirectLevelTarget.Baseline
+                        ? $"directClass={state.DirectClass}{(state.DirectClassFromEnergy ? "(energy)" : string.Empty)} "
+                        : string.Empty) +
+                    $"audioSamples={state.TunedAudioSamples} " +
                     $"doseL={ExposureState.LeftDose:0.000} doseR={ExposureState.RightDose:0.000}");
             }
         }
@@ -175,6 +183,20 @@ namespace GunsAreLoud.Client.Runtime
             _listener = null;
         }
 
+        /// <summary>
+        /// A listener probe for an explosion: its window opens once the sound
+        /// has flown <paramref name="delaySeconds"/>. 0 when no probe is free.
+        /// </summary>
+        internal int ArmExplosionProbe(DiagnosticShotToken token, float delaySeconds)
+        {
+            if (_config == null || !_config.Enabled.Value) return 0;
+            EnsureListenerProcessor(force: true);
+            if (_processor == null) return 0;
+            int rate = AudioRuntimeState.OutputSampleRate;
+            int delay = Mathf.RoundToInt(Mathf.Max(0f, delaySeconds) * Mathf.Max(8000, rate));
+            return _processor.ArmMasterProbe(_config.GetTuning().AutomaticPitchedRoute, false, rate, token, delay);
+        }
+
         internal void CancelDiagnosticProbes()
         {
             _processor?.CancelMasterProbes();
@@ -190,6 +212,9 @@ namespace GunsAreLoud.Client.Runtime
                 }
 
                 EnsureListenerProcessor();
+                // The output limiter's mode follows the Shot Density switch, so the
+                // A/B is one F12 click: off is the safety limiter and today's budget.
+                _processor?.SetProgramLimiter(_config.Enabled.Value && _config.ShotDensity.Value);
 
                 if (!_reportedCompatibility && DetailedDiagnostics.Enabled)
                 {
@@ -243,7 +268,7 @@ namespace GunsAreLoud.Client.Runtime
                     $"windowAnchor={telemetry.WindowAnchor} concurrentAudio={telemetry.IncludesConcurrentAudio} " +
                     $"channelScope={telemetry.ChannelScope} channelsMeasured={telemetry.ChannelsMeasured} " +
                     $"filterResetPerBout={telemetry.FilterStateResetAtWindowBout} initialTransient={telemetry.IncludesInitialFilterTransient} " +
-                    $"frames={telemetry.Frames} " +
+                    $"frames={telemetry.Frames} delayFrames={telemetry.DelayFrames} " +
                     $"preClampSamplePeak={telemetry.PreClampSamplePeak:0.000000} " +
                     $"postClampSamplePeak={telemetry.PostClampSamplePeak:0.000000} " +
                     $"preClampOver={telemetry.PreClampOverCount} postClampOver={telemetry.PostClampOverCount} " +
@@ -252,7 +277,10 @@ namespace GunsAreLoud.Client.Runtime
                     $"band80-160={ToDb(telemetry.Rms80To160):0.0}dBFS " +
                     $"band160-315={ToDb(telemetry.Rms160To315):0.0}dBFS " +
                     $"band315-2000={ToDb(telemetry.Rms315To2000):0.0}dBFS " +
-                    $"total={ToDb(telemetry.RmsTotal):0.0}dBFS");
+                    $"k0-50={telemetry.KAttackDb:0.0}dB k0-240={telemetry.KWeightedDb:0.0}dB " +
+                    $"total={ToDb(telemetry.RmsTotal):0.0}dBFS " +
+                    $"postK0-50={telemetry.PostKAttackDb:0.0}dB postK0-240={telemetry.PostKWeightedDb:0.0}dB " +
+                    $"postSamplePeak={telemetry.PostSamplePeak:0.000000}");
             }
         }
 

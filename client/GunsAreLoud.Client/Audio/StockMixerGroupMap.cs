@@ -73,7 +73,16 @@ namespace GunsAreLoud.Client.Audio
         /// <summary>Sources seen on a stock world group that has no pair.</summary>
         internal int UnmappedSources { get; private set; }
 
-        internal static StockMixerGroupMap TryCreate(AudioMixer stock, AudioMixer replacement, out string failure)
+        internal static StockMixerGroupMap TryCreate(AudioMixer stock, AudioMixer replacement, out string failure) =>
+            TryCreate(stock, replacement, null, null, out failure);
+
+        /// <param name="routes">The replacement variant's contrast route table, whose
+        /// parent paths tell same-named groups apart.</param>
+        /// <param name="stockToReplacementNames">Stock groups the replacement carries
+        /// under another name.</param>
+        internal static StockMixerGroupMap TryCreate(AudioMixer stock, AudioMixer replacement,
+            ContrastRouteSpec[] routes, IReadOnlyDictionary<string, string> stockToReplacementNames,
+            out string failure)
         {
             failure = null;
             if (stock == null || replacement == null || stock == replacement)
@@ -82,7 +91,8 @@ namespace GunsAreLoud.Client.Audio
             try
             {
                 result = StockMixerGroupMapper.Build(
-                    new AudioMixerGroupCatalog(stock), new AudioMixerGroupCatalog(replacement));
+                    new AudioMixerGroupCatalog(stock), new AudioMixerGroupCatalog(replacement),
+                    StockMixerGroupMapper.DefaultDisambiguationPaths(routes), stockToReplacementNames);
             }
             catch (Exception error)
             {

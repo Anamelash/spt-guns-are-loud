@@ -15,12 +15,47 @@ namespace GAL
 {
     public static class HeadphoneMixerGenerator
     {
-        private const string Source = "Assets/GunsAreLoud/Audio/MasterMixer.mixer";
-        private const string RawSource = "Assets/Validation/VanillaMasterMixer.mixer";
-        private const string Baseline = "Assets/VanillaMasterMixer.mixer";
-        private const string Output = "bundle";
-        private static readonly string[] DryWorldChildren =
-            { "NonspatialBypass", "Guns", "Main", "Occlusion" };
+        /// <summary>
+        /// One source mixer the headphone route is built on: the game's own,
+        /// or Sound Engine Backport's live mixer (EFT 1.0), whose one renamed
+        /// World child is Bypass and which has four groups the stock one lacks.
+        /// </summary>
+        private sealed class Variant
+        {
+            public string Source, RawSource, Baseline, Output, BundleName, BaselineBundleName, FilePrefix, Bypass;
+            public ContrastRouteSpec[] Routes;
+        }
+
+        private static readonly Variant Vanilla = new Variant {
+            Source = "Assets/GunsAreLoud/Audio/MasterMixer.mixer",
+            RawSource = "Assets/Validation/VanillaMasterMixer.mixer",
+            Baseline = "Assets/VanillaMasterMixer.mixer",
+            Output = "bundle", BundleName = "gal_headphone_mixer", BaselineBundleName = "gal_vanilla_repaired",
+            FilePrefix = "", Bypass = "NonspatialBypass", Routes = GunshotContrastMixerRouteTable.Routes
+        };
+
+        private static readonly Variant Live = new Variant {
+            Source = "Assets/GunsAreLoud/AudioLive/MasterMixer.mixer",
+            RawSource = "Assets/Validation/LiveMasterMixer.mixer",
+            Baseline = "Assets/LiveMasterMixer.mixer",
+            Output = "bundle-live", BundleName = "gal_headphone_mixer_live", BaselineBundleName = "gal_live_repaired",
+            FilePrefix = "live-", Bypass = "Bypass", Routes = GunshotContrastMixerRouteTable.LiveRoutes
+        };
+
+        private static Variant _variant = Vanilla;
+        private static string Source => _variant.Source;
+        private static string RawSource => _variant.RawSource;
+        private static string Baseline => _variant.Baseline;
+        private static string Output => _variant.Output;
+        private static string[] DryWorldChildren =>
+            new[] { _variant.Bypass, "Guns", "Main", "Occlusion" };
+        private static string[][] DirectElectronicsRoutes => new[] {
+            // The exposed name stays the same in both variants: the client
+            // writes one parameter whatever the group is called.
+            new[] { _variant.Bypass, "GAL_ElectronicsNonspatialBypassSend" },
+            new[] { "Voip", "GAL_ElectronicsVoipSend" },
+            new[] { "Occlusion", "GAL_ElectronicsOcclusionSend" }
+        };
         private static readonly string[][] ElectronicsRoutes = {
             new[] { "Guns", "GunsCompressorSendLevel", "GAL_ElectronicsGunsSend" },
             new[] { "ClientPlayer", "ClientPlayerCompressorSendLevel", "GAL_ElectronicsClientPlayerSend" },
@@ -32,19 +67,33 @@ namespace GAL
             new[] { "Ambient", "AmbientCompressorSendLevel", "GAL_ElectronicsAmbientSend" },
             new[] { "Returns", "EffectsReturnsCompressorSendLevel", "GAL_ElectronicsEffectsReturnsSend" }
         };
-        private static readonly string[][] DirectElectronicsRoutes = {
-            new[] { "NonspatialBypass", "GAL_ElectronicsNonspatialBypassSend" },
-            new[] { "Voip", "GAL_ElectronicsVoipSend" },
-            new[] { "Occlusion", "GAL_ElectronicsOcclusionSend" }
-        };
-
         public static void Build()
+        {
+            _variant = Vanilla;
+            BuildVariant();
+        }
+
+        /// <summary>The variant installed into Sound Engine Backport's live mixer slot.</summary>
+        public static void BuildLive()
+        {
+            _variant = Live;
+            try { BuildVariant(); }
+            finally { _variant = Vanilla; }
+        }
+
+        private static void BuildVariant()
         {
             RequireEffect("Meta XR Audio Reflection");
             RequireEffect("GAL Headphone Electronics");
             RequireParameterCount("GAL Headphone Electronics", ElectronicsParameterCount);
             if (AssetDatabase.LoadAssetAtPath<AudioMixer>(RawSource) == null)
                 throw new InvalidOperationException("Missing immutable raw source " + RawSource);
+            string sourceFolder = Path.GetDirectoryName(Source).Replace('\\', '/');
+            if (!AssetDatabase.IsValidFolder(sourceFolder))
+            {
+                Directory.CreateDirectory(sourceFolder);
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+            }
             AssetDatabase.DeleteAsset(Baseline);
             AssetDatabase.DeleteAsset(Source);
             if (!AssetDatabase.CopyAsset(RawSource, Baseline))
@@ -110,28 +159,29 @@ namespace GAL
             Validate(mixer);
             Directory.CreateDirectory(Output);
             var builds = new[] {
-                new AssetBundleBuild { assetBundleName = "gal_headphone_mixer", assetNames = new[] { Source } },
-                new AssetBundleBuild { assetBundleName = "gal_vanilla_repaired", assetNames = new[] { Baseline } }
+                new AssetBundleBuild { assetBundleName = _variant.BundleName, assetNames = new[] { Source } },
+                new AssetBundleBuild { assetBundleName = _variant.BaselineBundleName, assetNames = new[] { Baseline } }
             };
             if (BuildPipeline.BuildAssetBundles(Output, builds,
                 BuildAssetBundleOptions.ForceRebuildAssetBundle,
                 BuildTarget.StandaloneWindows64) == null)
                 throw new InvalidOperationException("AssetBundle build failed");
-            File.WriteAllLines("headphone-mixer-groups.txt",
+            string prefix = _variant.FilePrefix;
+            File.WriteAllLines(prefix + "headphone-mixer-groups.txt",
                 mixer.FindMatchingGroups("").Select(g => g.name));
-            File.WriteAllLines("headphone-mixer-parameters.txt", RequiredParameters());
-            File.WriteAllLines("headphone-mixer-repaired-parameters.txt", repairedParameters);
-            File.WriteAllLines("headphone-mixer-restored-aliases.txt", restoredAliases);
-            File.WriteAllLines("gunshot-contrast-routes.txt",
-                GunshotContrastMixerRouteTable.Routes.Select(route =>
+            File.WriteAllLines(prefix + "headphone-mixer-parameters.txt", RequiredParameters());
+            File.WriteAllLines(prefix + "headphone-mixer-repaired-parameters.txt", repairedParameters);
+            File.WriteAllLines(prefix + "headphone-mixer-restored-aliases.txt", restoredAliases);
+            File.WriteAllLines(prefix + "gunshot-contrast-routes.txt",
+                _variant.Routes.Select(route =>
                     route.ParentPath + "|" + route.InputPath + "|" + route.Parameter));
-            Debug.Log("GAL_HEADPHONE_MIXER_COMPLETE");
+            Debug.Log("GAL_HEADPHONE_MIXER_COMPLETE " + _variant.BundleName);
         }
 
         private static void AddContrastInputs(object controller, IList groups)
         {
             Type controllerType = controller.GetType();
-            foreach (ContrastRouteSpec route in GunshotContrastMixerRouteTable.Routes)
+            foreach (ContrastRouteSpec route in _variant.Routes)
             {
                 object parent = ResolveGroup(groups, "Master/InGame/" + route.ParentPath);
                 object input = controllerType.GetMethod("CreateNewGroup", Flags)
@@ -517,7 +567,7 @@ namespace GAL
             foreach (string parameter in RequiredParameters())
                 if (!mixer.GetFloat(parameter, out _))
                     throw new InvalidOperationException("Missing parameter " + parameter);
-            foreach (ContrastRouteSpec route in GunshotContrastMixerRouteTable.Routes)
+            foreach (ContrastRouteSpec route in _variant.Routes)
                 if (mixer.FindMatchingGroups(route.InputPath).Length != 1)
                     throw new InvalidOperationException("Missing contrast input " + route.InputPath);
         }
@@ -541,7 +591,7 @@ namespace GAL
             .Concat(Enumerable.Range(1, 9)
                 .SelectMany(i => new[] { $"GAL_PassiveBand{i}Gain",
                     $"GAL_PassiveBand{i}Frequency", $"GAL_PassiveBand{i}Q" }))
-            .Concat(GunshotContrastMixerRouteTable.Routes.Select(route => route.Parameter)).ToArray();
+            .Concat(_variant.Routes.Select(route => route.Parameter)).ToArray();
 
         private static object Unique(IList groups, string name)
         {

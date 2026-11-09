@@ -30,6 +30,7 @@ namespace GunsAreLoud.Client.Audio
         private readonly Dictionary<AudioMixerGroup, string> _groupNames =
             new Dictionary<AudioMixerGroup, string>();
         private int _fallbackFiltersCreated;
+        private bool _foreignMasterLogged;
         // Sources whose group belongs to a mixer this mod did not replace: they
         // are outside our routing graph, so only a per-source filter can reach
         // them. StockMixerGroupMap moves such sources onto the replacement as
@@ -220,6 +221,18 @@ namespace GunsAreLoud.Client.Audio
             _fallbackFiltersCreated++;
             bool ownMixer = original != null && HeadphoneMixerAsset.Owns(original.audioMixer);
             if (!ownMixer) _foreignMixerSources.Add(entry.Id);
+            // Under another mod's master mixer there are no routes of ours at
+            // all: every eligible source takes a filter, by design. One line
+            // says so; a line per group would only repeat it.
+            if (!ownMixer && _routes == null &&
+                (HeadphoneMixerAsset.Yielded || HeadphoneMixerAsset.IsForeignMaster(AudioRuntimeLookup.Audio?.Master)))
+            {
+                if (_foreignMasterLogged) return;
+                _foreignMasterLogged = true;
+                Plugin.Log?.LogInfo("Gunshot contrast: per-source filters, foreign master mixer (" +
+                    HeadphoneRouteRuntime.ForeignMixerOwner() + ")");
+                return;
+            }
             if (!_loggedFallbackGroups.Add(entry.GroupName ?? "none")) return;
             Plugin.Log?.LogInfo(
                 $"Gunshot contrast fallback filter: group={entry.GroupName ?? "none"} " +

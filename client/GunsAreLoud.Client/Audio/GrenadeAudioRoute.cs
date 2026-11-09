@@ -39,6 +39,7 @@ namespace GunsAreLoud.Client.Audio
         internal static void Release(BetterSource source)
         {
             if (source == null) return;
+            ExplosionLevel.Release(source);
             int key = source.GetInstanceID();
             if (!Routes.TryGetValue(key, out List<int> marked)) return;
             Routes.Remove(key);
@@ -72,13 +73,15 @@ namespace GunsAreLoud.Client.Audio
             Plugin.Runtime?.HandleExplosion(distance, indoor, position);
             GrenadeAudioRoute.MarkIfEmitting(__result);
             GunshotContrastController.Instance?.RefreshSourceTree(__result);
+            ExplosionLevel.Apply(bank, distance, __result);
             if (!DetailedDiagnostics.TryBegin(
                 DiagnosticEventKind.Grenade, out DiagnosticReservation reservation)) return;
             var status = HeadphoneRouteRuntime.Instance?.Status ?? default;
             foreach (var audio in __result.GetComponentsInChildren<AudioSource>(true))
                 DetailedDiagnostics.Commit(
                     reservation,
-                    $"grenade audio bank={bank.name} distance={distance:0.0}m mixer={audio.outputAudioMixerGroup?.name} " +
+                    $"grenade audio bank={bank.name} distance={distance:0.0}m rolloff={bank.Rolloff:0}m mixer={audio.outputAudioMixerGroup?.name} " +
+                    $"clip={audio.clip?.name} volume={audio.volume:0.000} pitch={audio.pitch:0.000} " +
                     $"contrastExempt={GrenadeAudioRoute.IsExplosion(audio)} headphoneMode={status.Effective} fallback={status.Fallback} profile={status.ProfileId}");
         }
         private static Exception Finalizer(Exception __exception, bool __state)
@@ -91,7 +94,14 @@ namespace GunsAreLoud.Client.Audio
     [HarmonyPatch(typeof(BetterSource), nameof(BetterSource.Release))]
     internal static class GrenadeReleasePatch
     {
-        private static void Prefix(BetterSource __instance) => GrenadeAudioRoute.Release(__instance);
+        private static void Prefix(BetterSource __instance)
+        {
+            GrenadeAudioRoute.Release(__instance);
+            // An engine that plays shots itself (SEB's live engine) returns its
+            // sources here directly, never through ReleaseQueue: undo the room
+            // response on the way out.
+            if (Engine.SoundEngine.Shots.ReleasesSourcesDirectly) LocalGunshotAudioProcessor.Bypass(__instance);
+        }
     }
 }
 

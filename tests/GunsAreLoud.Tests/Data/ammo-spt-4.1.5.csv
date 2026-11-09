@@ -1,0 +1,287 @@
+id,name,caliber,mass,speed,proj,src,mod
+54527a984bdc2d4e668b4567,5.56x45mm M855,Caliber556x45NATO,4,922,1,spt,
+54527ac44bdc2d36668b4567,5.56x45mm M855A1,Caliber556x45NATO,4,945,1,spt,
+560d5e524bdc2d25448b4571,12/70 7mm buckshot,Caliber12g,0.09,415,8,spt,
+560d61e84bdc2da74d8b4571,7.62x54mm R SNB gzh,Caliber762x54R,9.8,875,1,spt,
+5656d7c34bdc2d9d198b4587,7.62x39mm PS gzh,Caliber762x39,7.9,717,1,spt,
+5656eb674bdc2d35148b457c,40mm VOG-25 grenade,Caliber40mmRU,250,76,1,spt,
+56d59d3ad2720bdb418b4577,9x19mm Pst gzh,Caliber9x19PARA,5.4,457,1,spt,
+56dfef82d2720bbd668b4567,5.45x39mm BP gs,Caliber545x39,3.65,890,1,spt,
+56dff026d2720bb8668b4567,5.45x39mm BS gs,Caliber545x39,3.67,830,1,spt,
+56dff061d2720bb5668b4567,5.45x39mm BT gs,Caliber545x39,3.02,880,1,spt,
+56dff0bed2720bb0668b4567,5.45x39mm FMJ,Caliber545x39,3.85,884,1,spt,
+56dff216d2720bbd668b4568,5.45x39mm HP,Caliber545x39,3.56,884,1,spt,
+56dff2ced2720bb4668b4567,5.45x39mm PP gs,Caliber545x39,3.68,886,1,spt,
+56dff338d2720bbd668b4569,5.45x39mm PRS gs,Caliber545x39,3.85,866,1,spt,
+56dff3afd2720bba668b4567,5.45x39mm PS gs,Caliber545x39,3.4,890,1,spt,
+56dff421d2720b5f5a8b4567,5.45x39mm SP,Caliber545x39,3.56,873,1,spt,
+56dff4a2d2720bbd668b456a,5.45x39mm T gs,Caliber545x39,3.23,883,1,spt,
+56dff4ecd2720b5f5a8b4568,5.45x39mm US gs,Caliber545x39,5.15,303,1,spt,
+5735fdcd2459776445391d61,7.62x25mm TT AKBS,Caliber762x25TT,5.5,425,1,spt,
+5735ff5c245977640e39ba7e,7.62x25mm TT FMJ43,Caliber762x25TT,7.2,427,1,spt,
+573601b42459776410737435,7.62x25mm TT LRN,Caliber762x25TT,6.35,375,1,spt,
+573602322459776445391df1,7.62x25mm TT LRNPC,Caliber762x25TT,7.2,385,1,spt,
+5736026a245977644601dc61,7.62x25mm TT P gl,Caliber762x25TT,5.5,430,1,spt,
+573603562459776430731618,7.62x25mm TT Pst gzh,Caliber762x25TT,5.45,430,1,spt,
+573603c924597764442bd9cb,7.62x25mm TT PT gzh,Caliber762x25TT,5.39,415,1,spt,
+573718ba2459775a75491131,9x18mm PM BZhT gzh,Caliber9x18PM,5.7,325,1,spt,
+573719762459775a626ccbc1,9x18mm PM P gzh,Caliber9x18PM,6.1,302,1,spt,
+573719df2459775a626ccbc2,9x18mm PM PBM gzh,Caliber9x18PM,3.7,519,1,spt,
+57371aab2459775a77142f22,9x18mm PMM PstM gzh,Caliber9x18PM,5.8,420,1,spt,
+57371b192459775a9f58a5e0,9x18mm PM PPe gzh,Caliber9x18PM,7.8,297,1,spt,
+57371e4124597760ff7b25f1,9x18mm PM PPT gzh,Caliber9x18PM,6.3,301,1,spt,
+57371eb62459776125652ac1,9x18mm PM PRS gs,Caliber9x18PM,6.1,302,1,spt,
+57371f2b24597761224311f1,9x18mm PM PS gs PPO,Caliber9x18PM,6.3,330,1,spt,
+57371f8d24597761006c6a81,9x18mm PM PSO gzh,Caliber9x18PM,6,315,1,spt,
+5737201124597760fc4431f1,9x18mm PM Pst gzh,Caliber9x18PM,5.9,298,1,spt,
+5737207f24597760ff7b25f2,9x18mm PM PSV,Caliber9x18PM,7.5,280,1,spt,
+573720e02459776143012541,9x18mm PM RG028 gzh,Caliber9x18PM,6.4,330,1,spt,
+57372140245977611f70ee91,9x18mm PM SP7 gzh,Caliber9x18PM,4.2,420,1,spt,
+5737218f245977612125ba51,9x18mm PM SP8 gzh,Caliber9x18PM,5,250,1,spt,
+57a0dfb82459774d3078b56c,9x39mm SP-5 gs,Caliber9x39,16,290,1,spt,
+57a0e5022459774d1673f889,9x39mm SP-6 gs,Caliber9x39,16.2,305,1,spt,
+58820d1224597753c90aeb13,12/70 lead slug,Caliber12g,36.6,370,1,spt,
+58864a4f2459770fcc257101,9x19mm PSO gzh,Caliber9x19PARA,7.46,340,1,spt,
+5887431f2459777e1612938f,7.62x54mm R LPS gzh,Caliber762x54R,9.6,865,1,spt,
+58dd3ad986f77403051cba8f,7.62x51mm M80,Caliber762x51,9.5,838,1,spt,
+5943d9c186f7745a13413ac9,Shrapnel,Caliber9x18PM,0.09,90,1,spt,
+5996f6cb86f774678763a6ca,RGD-5 Shrapnel,Caliber9x18PM,0.09,90,1,spt,
+5996f6d686f77467977ba6cc,MON-50 Shrapnel,Caliber9x18PM,0.09,90,1,spt,
+5996f6fc86f7745e585b4de3,M67 Shrapnel,Caliber9x18PM,0.09,100,1,spt,
+59e0d99486f7744a32234762,7.62x39mm BP gzh,Caliber762x39,7.9,730,1,spt,
+59e4cf5286f7741778269d8a,7.62x39mm T-45M1 gzh,Caliber762x39,7.5,720,1,spt,
+59e4d24686f7741776641ac7,7.62x39mm US gzh,Caliber762x39,12.55,301,1,spt,
+59e4d3d286f774176a36250a,7.62x39mm HP,Caliber762x39,8,754,1,spt,
+59e6542b86f77411dc52a77a,.366 TKM FMJ,Caliber366TKM,13,580,1,spt,
+59e655cb86f77411dc52a77b,.366 TKM EKO,Caliber366TKM,6.5,770,1,spt,
+59e6658b86f77411d949b250,.366 TKM Geksa,Caliber366TKM,15.5,550,1,spt,
+59e68f6f86f7746c9f75e846,5.56x45mm M856,Caliber556x45NATO,4.15,874,1,spt,
+59e6906286f7746c9f75e847,5.56x45mm M856A1,Caliber556x45NATO,4,940,1,spt,
+59e690b686f7746c9f75e848,5.56x45mm M995,Caliber556x45NATO,3.37,1013,1,spt,
+59e6918f86f7746c9f75e849,5.56x45mm MK 255 Mod 0 (RRLP),Caliber556x45NATO,5,936,1,spt,
+59e6920f86f77411d82aa167,5.56x45mm FMJ,Caliber556x45NATO,3.75,957,1,spt,
+59e6927d86f77411da468256,5.56x45mm HP,Caliber556x45NATO,3.6,947,1,spt,
+59e77a2386f7742ee578960a,7.62x54mm R PS gzh,Caliber762x54R,9.8,875,1,spt,
+5a269f97c4a282000b151807,9x21mm PS gzh,Caliber9x21,6.7,410,1,spt,
+5a26abfac4a28232980eabff,9x21mm P gzh,Caliber9x21,7.9,413,1,spt,
+5a26ac06c4a282000c5a90a8,9x21mm PE gzh,Caliber9x21,6.7,415,1,spt,
+5a26ac0ec4a28200741e1e18,9x21mm BT gzh,Caliber9x21,6.7,410,1,spt,
+5a38ebd9c4a282000d722a5b,20/70 7.5mm buckshot,Caliber20g,3.5,430,8,spt,
+5a3c16fe86f77452b62de32a,9x19mm Luger CCI,Caliber9x19PARA,7.46,420,1,spt,
+5a6086ea4f39f99cd479502f,7.62x51mm M61,Caliber762x51,9.75,838,1,spt,
+5a608bf24f39f98ffc77720e,7.62x51mm M62 Tracer,Caliber762x51,9.2,838,1,spt,
+5ba2678ad4351e44f824b344,4.6x30mm FMJ SX,Caliber46x30,2.6,620,1,spt,
+5ba26812d4351e003201fef1,4.6x30mm Action SX,Caliber46x30,2,690,1,spt,
+5ba26835d4351e0035628ff5,4.6x30mm AP SX,Caliber46x30,1.6,680,1,spt,
+5ba26844d4351e00334c9475,4.6x30mm Subsonic SX,Caliber46x30,5,290,1,spt,
+5c0d56a986f774449d5de529,9x19mm RIP,Caliber9x19PARA,5.97,381,1,spt,
+5c0d591486f7744c505b416f,12/70 RIP,Caliber12g,19.6,410,1,spt,
+5c0d5ae286f7741e46554302,5.56x45mm Warmageddon,Caliber556x45NATO,5,936,1,spt,
+5c0d5e4486f77478390952fe,5.45x39mm PPBS gs Igolnik,Caliber545x39,4.1,905,1,spt,
+5c0d668f86f7747ccb7f13b2,9x39mm SPP gs,Caliber9x39,16,310,1,spt,
+5c0d688c86f77413ae3407b2,9x39mm BP gs,Caliber9x39,15.5,295,1,spt,
+5c3df7d588a4501f290594e5,9x19mm Green Tracer,Caliber9x19PARA,6,365,1,spt,
+5c925fa22e221601da359b7b,9x19mm AP 6.3,Caliber9x19PARA,5.18,392,1,spt,
+5cadf6ddae9215051e1c23b2,12.7x55mm PS12,Caliber127x55,33,300,1,spt,
+5cadf6e5ae921500113bb973,12.7x55mm PS12A,Caliber127x55,7,870,1,spt,
+5cadf6eeae921500134b2799,12.7x55mm PS12B,Caliber127x55,18,570,1,spt,
+5cc80f38e4a949001152b560,5.7x28mm SS190,Caliber57x28,4,715,1,spt,
+5cc80f53e4a949000e1ea4f8,5.7x28mm L191,Caliber57x28,4,715,1,spt,
+5cc80f67e4a949035e43bbba,5.7x28mm SB193,Caliber57x28,4,299,1,spt,
+5cc80f79e4a949033c7343b2,5.7x28mm SS198LF,Caliber57x28,4,792,1,spt,
+5cc80f8fe4a949033b0224a2,5.7x28mm SS197SR,Caliber57x28,4,594,1,spt,
+5cc86832d7f00c000d3a6e6c,5.7x28mm R37.F,Caliber57x28,2.4,729,1,spt,
+5cc86840d7f00c002412c56c,5.7x28mm R37.X,Caliber57x28,2.4,724,1,spt,
+5cde8864d7f00c0010373be1,12.7x108mm B-32,Caliber127x108,48.3,818,1,spt,
+5d2f2ab648f03550091993ca,12.7x108mm BZT-44M,Caliber127x108,48.3,818,1,spt,
+5d6e6772a4b936088465b17c,12/70 5.25mm buckshot,Caliber12g,0.74,330,8,spt,
+5d6e67fba4b9361bc73bc779,12/70 6.5mm Express buckshot,Caliber12g,2.1,430,9,spt,
+5d6e6806a4b936088465b17e,12/70 8.5mm Magnum buckshot,Caliber12g,3.38,385,8,spt,
+5d6e6869a4b9361c140bcfde,12/70 Grizzly 40 slug,Caliber12g,40,390,1,spt,
+5d6e6891a4b9361bd473feea,12/70 Poleva-3 slug,Caliber12g,28,410,1,spt,
+5d6e689ca4b9361bc8618956,12/70 Poleva-6u slug,Caliber12g,33.5,430,1,spt,
+5d6e68a8a4b9360b6c0d54e2,12/70 AP-20 armor-piercing slug,Caliber12g,28.3,510,1,spt,
+5d6e68b3a4b9361bca7e50b5,12/70 Copper Sabot Premier HP slug,Caliber12g,28.35,442,1,spt,
+5d6e68c4a4b9361b93413f79,12/70 makeshift .50 BMG slug,Caliber12g,45,410,1,spt,
+5d6e68d1a4b93622fe60e845,12/70 SuperFormance HP slug,Caliber12g,19.5,594,1,spt,
+5d6e68dea4b9361bcc29e659,12/70 Dual Sabot slug,Caliber12g,22.5,415,2,spt,
+5d6e68e6a4b9361c140bcfe0,12/70 FTX Custom Lite slug,Caliber12g,19.4,480,1,spt,
+5d6e6911a4b9361bd5780d52,12/70 flechette,Caliber12g,0.47,320,8,spt,
+5d6e695fa4b936359b35d852,20/70 5.6mm buckshot,Caliber20g,1,340,8,spt,
+5d6e69b9a4b9361bc8618958,20/70 6.2mm buckshot,Caliber20g,1.26,410,8,spt,
+5d6e69c7a4b9360b6c0d54e4,20/70 7.3mm buckshot,Caliber20g,2,475,9,spt,
+5d6e6a05a4b93618084f58d0,20/70 Star slug,Caliber20g,31.2,415,1,spt,
+5d6e6a42a4b9364f07165f52,20/70 Poleva-6u slug,Caliber20g,28.7,445,1,spt,
+5d6e6a53a4b9361bd473feec,20/70 Poleva-3 slug,Caliber20g,20,425,1,spt,
+5d6e6a5fa4b93614ec501745,20/70 Devastator slug,Caliber20g,19.4,405,1,spt,
+5d70e500a4b9364de70d38ce,30x29mm VOG-30,Caliber30x29,280,185,1,spt,
+5e023cf8186a883be655e54f,7.62x54mm R T-46M gzh,Caliber762x54R,9.6,800,1,spt,
+5e023d34e8a400319a28ed44,7.62x54mm R BT gzh,Caliber762x54R,9.5,875,1,spt,
+5e023d48186a883be655e551,7.62x54mm R BS gs,Caliber762x54R,12.2,785,1,spt,
+5e023e53d4353e3302577c4c,7.62x51mm BCP FMJ,Caliber762x51,9.4,800,1,spt,
+5e023e6e34d52a55c3304f71,7.62x51mm TCW SP,Caliber762x51,10.8,771,1,spt,
+5e023e88277cce2b522ff2b1,7.62x51mm Ultra Nosler,Caliber762x51,10.7,823,1,spt,
+5e81f423763d9f754677bf2e,.45 ACP Match FMJ,Caliber1143x23ACP,7.46,340,1,spt,
+5e85a9a6eacf8c039e4e2ac1,23x75mm Shrapnel-10 buckshot,Caliber23x75,3.38,270,8,spt,
+5e85a9f4add9fe03027d9bf1,23x75mm Zvezda flashbang round,Caliber23x75,20,80,1,spt,
+5e85aa1a988a8701445df1f5,23x75mm Barrikada slug,Caliber23x75,80,420,1,spt,
+5ea2a8e200685063ec28c05a,.45 ACP RIP,Caliber1143x23ACP,7.46,293,1,spt,
+5ede4739e0350d05467f73e8,40x46mm M406 (HE) grenade,Caliber40x46,230,76,1,spt,
+5ede47405b097655935d7d16,40x46mm M441 (HE) grenade,Caliber40x46,230,76,1,spt,
+5ede474b0c226a66f5402622,40x46mm M381 (HE) grenade,Caliber40x46,230,76,1,spt,
+5ede475339ee016e8c534742,40x46mm M576 (MP-APERS) grenade,Caliber40x46,0.09,269,15,spt,
+5ede475b549eed7c6d5c18fb,40x46mm M386 (HE) grenade,Caliber40x46,230,76,1,spt,
+5efb0c1bd79ff02a1f5e68d9,7.62x51mm M993,Caliber762x51,8.1,930,1,spt,
+5efb0cabfb3e451d70735af5,.45 ACP AP,Caliber1143x23ACP,13.8,299,1,spt,
+5efb0d4f4bc50b58e81710f3,.45 ACP Lasermatch FMJ,Caliber1143x23ACP,15,290,1,spt,
+5efb0da7a29a85116f6ea05f,9x19mm PBP gzh,Caliber9x19PARA,4.1,560,1,spt,
+5efb0e16aeb21837e749c7ff,9x19mm QuakeMaker,Caliber9x19PARA,11.99,290,1,spt,
+5efb0fc6aeb21837e749c801,.45 ACP Hydra-Shok,Caliber1143x23ACP,14.9,274,1,spt,
+5f0596629e22f464da6bbdd9,.366 TKM AP-M,Caliber366TKM,18,602,1,spt,
+5f0c892565703e5c461894e9,40x46mm M433 (HEDP) grenade,Caliber40x46,230,76,1,spt,
+5f647f31b6238e5dd066e196,23x75mm Shrapnel-25 buckshot,Caliber23x75,3.38,375,8,spt,
+5f647fd3f6e4ab66c82faed6,23x75mm Volna-R rubber slug,Caliber23x75,0,270,8,spt,
+5fbe3ffdf8b6a877a729ea82,.300 Blackout BCP FMJ,Caliber762x35,9.3,605,1,spt,
+5fc275cf85fd526b824a571a,.338 Lapua Magnum FMJ,Caliber86x70,16.2,900,1,spt,
+5fc382a9d724d907e2077dab,.338 Lapua Magnum AP,Caliber86x70,16.1,849,1,spt,
+5fc382b6d6fa9c00c571bbc3,.338 Lapua Magnum TAC-X,Caliber86x70,18.5,880,1,spt,
+5fc382c1016cce60e8341b20,.338 Lapua Magnum UCW,Caliber86x70,16.2,849,1,spt,
+5fd20ff893a8961fc660a954,.300 Blackout AP,Caliber762x35,9.3,635,1,spt,
+60194943740c5d77f6705eea,5.56x45mm MK 318 Mod 0 (SOST),Caliber556x45NATO,4,902,1,spt,
+601949593ae8f707c4608daa,5.56x45mm SSA AP,Caliber556x45NATO,3.37,1013,1,spt,
+601aa3d2b2bcb34913271e6d,7.62x39mm MAI AP,Caliber762x39,7.9,875,1,spt,
+61962b617c6c7b169525f168,5.45x39mm 7N40,Caliber545x39,3.65,915,1,spt,
+61962d879bb3d20b0946d385,9x39mm PAB-9 gs,Caliber9x39,15.5,320,1,spt,
+6196364158ef8c428c287d9f,.300 Blackout V-Max,Caliber762x35,9.3,723,1,spt,
+6196365d58ef8c428c287da1,.300 Whisper,Caliber762x35,9.3,853,1,spt,
+619636be6db0f2477964e710,.300 Blackout M62 Tracer,Caliber762x35,9.3,442,1,spt,
+62330b3ed4dc74626d570b95,.357 Magnum FMJ,Caliber9x33R,10.15,385,1,spt,
+62330bfadc5883093563729b,.357 Magnum HP,Caliber9x33R,10.3,481,1,spt,
+62330c18744e5e31df12f516,.357 Magnum JHP,Caliber9x33R,10.3,425,1,spt,
+62330c40bdd19b369e1e53d1,.357 Magnum SP,Caliber9x33R,10.2,455,1,spt,
+62389aaba63f32501b1b444f,26x75mm flare cartridge (Green),Caliber26x75,20,80,1,spt,
+62389ba9a63f32501b1b4451,26x75mm flare cartridge (Red),Caliber26x75,20,80,1,spt,
+62389bc9423ed1685422dc57,26x75mm flare cartridge (White),Caliber26x75,20,80,1,spt,
+62389be94d5d474bf712e709,26x75mm flare cartridge (Yellow),Caliber26x75,20,80,1,spt,
+6241c316234b593b5676b637,Airsoft 6mm BB,Caliber556x45NATO,0.02,70,1,spt,
+624c0570c9b794431568f5d5,Signal flare (Green),Caliber26x75,20,80,1,spt,
+624c09cfbc2e27219346d955,Signal flare (Red),Caliber26x75,20,80,1,spt,
+624c09da2cec124eb67c1046,Signal flare (White),Caliber26x75,20,80,1,spt,
+624c09e49b98e019a3315b66,Signal flare (Yellow),Caliber26x75,20,80,1,spt,
+635267f063651329f75a4ee8,26x75mm flare cartridge (Acid Green),Caliber26x75,20,80,1,spt,
+63b35f281745dd52341e5da7,F1 Shrapnel,Caliber9x18PM,0.09,90,1,spt,
+64b6979341772715af0f9c39,4.6x30mm JSP SX,Caliber46x30,2,579,1,spt,
+64b7af434b75259c590fa893,7.62x39mm PP gzh,Caliber762x39,7.9,732,1,spt,
+64b7af5a8532cf95ee0a0dbd,7.62x39mm FMJ,Caliber762x39,7.9,775,1,spt,
+64b7af734b75259c590fa895,7.62x39mm SP,Caliber762x39,7.9,772,1,spt,
+64b7bbb74b75259c590fa897,9x19mm FMJ M882,Caliber9x19PARA,5.4,385,1,spt,
+64b8725c4b75259c590fa899,.300 Blackout CBJ,Caliber762x35,9.3,725,1,spt,
+64b8ee384b75259c590fa89b,12/70 Piranha,Caliber12g,0.47,310,10,spt,
+64b8f7968532cf95ee0a0dbf,7.62x54mm R FMJ,Caliber762x54R,9.6,760,1,spt,
+64b8f7b5389d7ffd620ccba2,7.62x54mm R SP BT,Caliber762x54R,9.6,703,1,spt,
+64b8f7c241772715af0f9c3d,7.62x54mm R HP BT,Caliber762x54R,9.6,807,1,spt,
+6529243824cbe3c74a05e5c1,6.8x51mm SIG Hybrid,Caliber68x51,8.7,914,1,spt,
+6529302b8c26af6326029fb7,6.8x51mm SIG FMJ,Caliber68x51,9.07,899,1,spt,
+6576f4708ca9c4381d16cd9d,9x21mm 7N42 Zubilo,Caliber9x21,6.7,400,1,spt,
+6576f93989f0062e741ba952,9x21mm 7U4,Caliber9x21,6.7,300,1,spt,
+6576f96220d53a5b8f3e395e,9x39mm FMJ,Caliber9x39,15.5,330,1,spt,
+660137d8481cc6907a0c5cda,20/70 TSS Armor Piercing Slug,Caliber20g,19.4,482,1,spt,
+660137ef76c1b56143052be8,20/70 Dangerous Game Slug,Caliber20g,19.4,476,1,spt,
+6601380580e77cfd080e3418,20/70 flechette,Caliber20g,3.5,400,8,spt,
+6601546f86889319850bd566,20x1mm disk,Caliber20x1mm,0.1,20,1,spt,
+668fe62ac62660a5d8071446,.50 AE FMJ,Caliber127x33,19.4,440,1,spt,
+66a0d1c87d0d369e270bb9de,.50 AE JHP,Caliber127x33,19.4,440,1,spt,
+66a0d1e0ed648d72fe064d06,.50 AE Copper Solid,Caliber127x33,25.9,460,1,spt,
+66a0d1f88486c69fce00fdf6,.50 AE Hawk JSP,Caliber127x33,26.4,465,1,spt,
+66d97834d2985e11480d5c1e,Signal flare (Blue),Caliber26x75,20,80,1,spt,
+66d9f3047b82b9a9aa055d81,Signal flare (Special Yellow),Caliber26x75,20,80,1,spt,
+66ec2aa6daf127599c0c31f1,O-832DU Shrapnel,Caliber9x18PM,0.09,100,1,spt,
+675ea4891b2579e8fe0250aa,Signal flare (New Year),Caliber26x75,20,80,1,spt,
+67654a6759116d347b0bfb86,V40 shrapnel,Caliber9x18PM,0.09,100,1,spt,
+6768c25aa7b238f14a08d3f6,7.62x51mm M80A1,Caliber762x51,8.4,899,1,spt,
+677ae5df4be46b83620bf055,,Caliber9x18PM,0,0,1,spt,
+67ade494d748873e5f0161df,VOG-30 Shrapnel,Caliber9x18PM,0.09,90,1,spt,
+67d41936f378a36c4706eeb9,.50 BMG HP,Caliber127x99,42.1,880,1,spt,
+67dc212493ce32834b0fa446,.50 BMG M21,Caliber127x99,45.3,867,1,spt,
+67dc255ee3028a8b120efc48,.50 BMG M33,Caliber127x99,42.8,887,1,spt,
+67dc2648ba5b79876906a166,.50 BMG M903 SLAP,Caliber127x99,27,1220,1,spt,
+69e63d858a819d09900d74e9,6.5x52mm Carcano,Caliber65x52,9.75,838,1,mod,Eco-WW2-Pack
+6a0a256686f368092e4252e8,.30-06 Springfield AP M2,Caliber762x63,10.7,910,1,mod,Eco-WW2-Pack
+6a0a25ee86f368092e4252ea,.30-06 Springfield FMJ,Caliber762x63,9.7,870,1,mod,Eco-WW2-Pack
+6a0a271886f368092e4252ec,.30-06 Springfield JHP,Caliber762x63,11.3,845,1,mod,Eco-WW2-Pack
+6a0a27ee86f368092e4252ee,.30-06 Springfield Red Tracer,Caliber762x63,9.5,860,1,mod,Eco-WW2-Pack
+6a0cf4b799dfd9edaca1daac,7.92x57mm Mauser FMJ,Caliber792x57,12.8,760,1,mod,Eco-WW2-Pack
+6a0cf4b799dfd9edaca1daae,7.92x57mm Mauser SmK L’Spur red tracer,Caliber792x57,10.8,800,1,mod,Eco-WW2-Pack
+6a0b879aa02e563a2a14500f,7.92x33mm Kurz FMJ,Caliber792x33,8.1,685,1,mod,Eco-WW2-Pack
+6a0b88cfa02e563a2a145012,7.92x33mm Kurz Pist. Patr. 43 L'spur Tracer,Caliber792x33,7.9,705,1,mod,Eco-WW2-Pack
+6851a7436b5a01959e6f54f9,.40 S&W FMJ,Caliber102x22,11.7,355,1,mod,EukyreECOT
+6851a9c7efa6d303c471beb2,.40 S&W JHP,Caliber102x22,11.3,325,1,mod,EukyreECOT
+6851ab968c52422fbf785f59,.40 S&W +P,Caliber102x22,10.5,368,1,mod,EukyreECOT
+6851add2caf8415c3bb32142,.40 S&W Red Tracer,Caliber102x22,10.9,342,1,mod,EukyreECOT
+687b8b75fd434e69a5d76a20,.40 S&W Woodsman,Caliber102x22,9.9,330,1,mod,EukyreECOT
+687b8d7cfc440519506ed342,.40 S&W RIP,Caliber102x22,12.6,325,1,mod,EukyreECOT
+687b919eaaa579212ca2be2a,.40 S&W Xtreme Penetrator,Caliber102x22,12.6,415,1,mod,EukyreECOT
+68561ab84857b945e0ce85e9,.338 Lapua Magnum RIP,Caliber86x70,18.5,860,1,mod,EukyreECOT
+6859749fb61f50b920ae5a2a,.338 Lapua Magnum Raufoss,Caliber86x70,16.4,895,1,mod,EukyreECOT
+6a46b5ec55354e6b4b5f2756,SALCO's ARMORY: 1143x23mm (.45 APC) - Warden,Caliber1143x23ACP,13.8,330,1,mod,SalcosArmory
+6a46b4e970caf2c92cda1007,SALCO's ARMORY: 5.45x39mm - 7N39M,Caliber545x39,3.67,868,1,mod,SalcosArmory
+6a46b4fef14c448553778f95,SALCO's ARMORY: 5.56x45mm - M995A1,Caliber556x45NATO,3.37,1013,1,mod,SalcosArmory
+6a46a967bae4cc4c6974ff63,SALCO's ARMORY: 6.8x51mm - Blutadler,Caliber68x51,9.07,803,1,mod,SalcosArmory
+6a46a98a99b1351b560843ef,SALCO's ARMORY: 7.62x35mm (.300 Blackout) - Spartans,Caliber762x35,9.3,695,1,mod,SalcosArmory
+6a46b5d55aa43208a7bb9f5d,SALCO's ARMORY: 7.62x39mm - 7N23M,Caliber762x39,7.9,805,1,mod,SalcosArmory
+672e2e75195420ccca420a2f,6x38mm ARC,Caliber556x45NATO,6,965,1,mod,TGC-NG
+66d0c1319aba7b6bff460a37,7.92x57mm RLA FMJ,Caliber792x57,12.8,760,1,mod,WTT-Armory
+682e8c4bc098b59f14dde097,7.92x57mm RLA SP,Caliber792x57,12,810,1,mod,WTT-Armory
+6861847dfd5210a3e64677a3,7.92x57mm FMJ Surplus,Caliber792x57,12.8,755,1,mod,WTT-Armory
+684e2ded3b64f7187cf14fae,.300 Winchester Magnum FMJ,Caliber762x67B,13.9,902,1,mod,WTT-Armory
+684e2de88bb7e9f52bfab35c,.300 Winchester Magnum AP,Caliber762x67B,14.2,885,1,mod,WTT-Armory
+684e2de4c90977ea0b7b83fe,.300 Winchester Magnum HP,Caliber762x67B,10.9,1022,1,mod,WTT-Armory
+c556f40e464c7f09d4c757fc,.338 Norma Magnum Golden Target HPBT,Caliber86x63,19.44,838,1,mod,WTT-Armory
+ea4cdb6fc3dd4f799eeef33e,.338 Norma Magnum Sierra MatchKing HPBT,Caliber86x63,18.47,853,1,mod,WTT-Armory
+68d3f708c61fce2651e9e9ac,9x18mm PM Underwood HT,Caliber9x18PM,7.5,305,1,mod,WTT-Armory
+68fd537f2965f74cf4a87894,.408 Cheyenne Tactical FMJ,Caliber1036x77,22.5,998,1,mod,WTT-Armory
+68fd53b6087e82ccf8586c51,.408 Cheyenne Tactical AP,Caliber1036x77,26.95,974,1,mod,WTT-Armory
+68fd53be7254b4b0b21f25b9,.408 Cheyenne Tactical DTM Match,Caliber1036x77,19.76,1066,1,mod,WTT-Armory
+69389a69a516eeec6b6a5b72,25x59mm XM1103,Caliber25x59,250,425,1,mod,WTT-Armory
+6938bc0b6e96bcf17932873e,25x59mm XM1019 timed fuse,Caliber25x59,250,425,1,mod,WTT-Armory
+6938bca4c4ab39c99232873f,25x59mm XM1099 API,Caliber25x59,250,425,1,mod,WTT-Armory
+6938bcbdd8c13e10cd328740,25x59mm XM1049 AP,Caliber25x59,250,425,1,mod,WTT-Armory
+6941ef6424ad69dcab0d9a64,.44 Magnum FMJ,Caliber11x33R,10.15,369,1,mod,WTT-Armory
+6941ef6424ad69dcab0d9a6d,.44 Magnum JHP,Caliber11x33R,10.3,369,1,mod,WTT-Armory
+694316154eb853dd5707e76a,.44 Magnum Soft Point,Caliber11x33R,10.2,369,1,mod,WTT-Armory
+694316154eb853dd5707e76c,.44 Magnum Xtreme Penetrator,Caliber11x33R,10.15,369,1,mod,WTT-Armory
+694316154eb853dd5707e76e,.44 Magnum Red Tracer,Caliber11x33R,10.2,369,1,mod,WTT-Armory
+687daf1f7353335188000001,.50 BMG M1 Incendiary,Caliber127x99,40,906,1,mod,WTT-Armory
+687daf1f7353335188000002,.50 BMG M2 AP,Caliber127x99,45,884,1,mod,WTT-Armory
+687daf1f7353335188000003,.50 BMG M8 API,Caliber127x99,43,906,1,mod,WTT-Armory
+687daf1f7353335188000004,.50 BMG M20 APIT,Caliber127x99,40,906,1,mod,WTT-Armory
+687daf1f7353335188000005,.50 BMG M48,Caliber127x99,53,887,1,mod,WTT-Armory
+687daf1f7353335188000006,.50 BMG MK 211 Mod 0 (Raufoss),Caliber127x99,44,905,1,mod,WTT-Armory
+68c15f77ed3d7df9220debd6,7.62x25mm TT M995,Caliber762x25TT,3.4,940,1,mod,WTT-ContentBackport
+67c540cfb032bbdb530201b8,.308 ME LOKT,Caliber784x49,9.75,838,1,mod,WTT-ContentBackport
+68c15a033173b556890b5959,7.62x25mm TT M855A1,Caliber762x25TT,4,900,1,mod,WTT-ContentBackport
+68bac6ca653ee6b1e406d978,9.3x64mm FMJ,Caliber93x64,17.5,793,1,mod,WTT-ContentBackport
+68aeed8a8906b00bc800fdd6,9.3x64mm SP,Caliber93x64,17.4,697,1,mod,WTT-ContentBackport
+67c540c3d0538d12ec036c08,.308 ME,Caliber784x49,9.75,838,1,mod,WTT-ContentBackport
+68bad8376cb22acf1107a586,9.3x64mm 7N33,Caliber93x64,16.6,790,1,mod,WTT-ContentBackport
+68c15b4bb30038a118088bd6,7.62x25mm TT M856A1,Caliber762x25TT,3.6,900,1,mod,WTT-ContentBackport
+6a60f36fb3d057447a095aee,.50 AE FMJ Bull,Caliber127x33,19.4,635,1,mod,WTT-ContentBackport
+6a07208057b2695f9d001e63,5.8x42mm DBP191,Caliber58x42,4.5,840,1,mod,WTT-ContentBackport
+6a42661705016139300b2085,5.8x42mm DBX95,Caliber58x42,4.1,910,1,mod,WTT-ContentBackport
+6a42662fcb506840dd053827,5.8x42mm DVC12,Caliber58x42,5.5,872,1,mod,WTT-ContentBackport
+6a426637ddc63098d100ae67,5.8x42mm DVX12,Caliber58x42,5,850,1,mod,WTT-ContentBackport
+69111d386d6226b577e619b1,12/70 armor-piercing Slug “SVAROG”,Caliber12g,28.3,510,1,mod,makeshotgunsgreatagain
+6911202ab8757755a4d62f3c,12/70 7mm Buckshot Brass Case,Caliber12g,0.09,415,10,mod,makeshotgunsgreatagain
+6995e5f38ebb130aec79e509,5.45x39mm 'Svalka' Anti-Drone Buckshot,Caliber545x39,0.09,300,5,mod,makeshotgunsgreatagain
+6910e1cbbd20f63a9791742e,.700 Nitro Express FMJ,Caliber178x89,64.8,605,1,mod,makeshotgunsgreatagain
+25c870f3b572c2f2db00bfb8,.700 Nitro Express SP "Mammoth",Caliber178x89,64.8,605,1,mod,makeshotgunsgreatagain
+2469576cb545e234792b3d35,.700 Nitro Express AP "Goliath",Caliber178x89,64.8,605,1,mod,makeshotgunsgreatagain
+dcbc76154efbfbc64506f30e,.700 Nitro Express buckshot "Cerberus",Caliber178x89,8.1,605,8,mod,makeshotgunsgreatagain
+3ed19bd544854f098ce5c2bb,.410/76 lead birdshot,Caliber410g,0.16,330,20,mod,makeshotgunsgreatagain
+36d2e4ec1ac64ab19d477d5b,.410/76 000 buckshot,Caliber410g,4.53,330,5,mod,makeshotgunsgreatagain
+6aea74e19d394c03816fd104,.410/76 lead slug,Caliber410g,7.1,420,1,mod,makeshotgunsgreatagain
+698924bf6dcd41ac313f5921,12/70 'Hellfire' hybrid buckshot,Caliber12g,0.09,415,10,mod,makeshotgunsgreatagain
+69111e8fab39296e6f0f310a,12/70 Flechette Kinghunter,Caliber12g,0.47,320,10,mod,makeshotgunsgreatagain
+699358094978fa2d65f4dcf3,12/70 'FRAG-12',Caliber12g,40,320,1,mod,makeshotgunsgreatagain
+69111bf76c4be2b06bd0745c,12/70 Magnum Express Kinghunter,Caliber12g,3.38,385,9,mod,makeshotgunsgreatagain
+6911031c1e9fa1008ce6e1aa,12/70 Winchester Super-X 00 buckshot,Caliber12g,0.09,415,6,mod,makeshotgunsgreatagain

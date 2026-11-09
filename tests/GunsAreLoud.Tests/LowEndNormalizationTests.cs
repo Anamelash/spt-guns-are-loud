@@ -62,6 +62,10 @@ namespace GunsAreLoud.Tests
             return pcm;
         }
 
+        // A refresh hands the queue to the measurement thread; the tests reason
+        // about fully measured sets, so they wait for it.
+        private void Refresh() => LowEndNormalizationCache.CompletePending(_config.GetTuning());
+
         private LocalGunshotAudioTuning AudioTuning(bool normalizeBass = false)
         {
             TuningSnapshot t = _config.GetTuning();
@@ -82,7 +86,7 @@ namespace GunsAreLoud.Tests
             for (int i = 0; i < a.Length; i++) { a[i] += texture[i]; b[i] += texture[i]; }
             LowEndNormalizationCache.Register(1, Rate, a, 1, 0);
             LowEndNormalizationCache.Register(2, Rate, b, 1, 0);
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
             var first = LowEndNormalizationCache.Evaluate(1, AudioTuning(true));
             var second = LowEndNormalizationCache.Evaluate(2, AudioTuning(true));
             Assert.That(first.Ready && second.Ready, Is.True);
@@ -98,14 +102,62 @@ namespace GunsAreLoud.Tests
         {
             LowEndNormalizationCache.Register(1, Rate, Tone(0.1f), 1, 0);
             LowEndNormalizationCache.Register(2, Rate, Tone(0.2f), 1, 0);
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
+        }
+
+        [Test]
+        public void UnmeasuredVariantBorrowsTheGeometricMeanOfItsMeasuredSiblings()
+        {
+            LowEndNormalizationCache.Register(1, Rate, Tone(0.1f), 1, 0);
+            LowEndNormalizationCache.Register(2, Rate, Tone(0.4f), 1, 0);
+            LowEndNormalizationCache.Siblings(1, 2, 3);
+            Refresh();
+            var first = LowEndNormalizationCache.Evaluate(1, AudioTuning());
+            var second = LowEndNormalizationCache.Evaluate(2, AudioTuning());
+            var borrowed = LowEndNormalizationCache.Evaluate(3, AudioTuning());
+            Assert.That(borrowed.Ready, Is.True);
+            Assert.That(borrowed.MeasuredRms,
+                Is.EqualTo(Math.Sqrt(first.MeasuredRms * second.MeasuredRms)).Within(1e-5));
+            Assert.That(borrowed.BodyGain, Is.GreaterThan(second.BodyGain).And.LessThan(first.BodyGain));
+        }
+
+        [Test]
+        public void OwnMeasurementReplacesTheSiblingEstimate()
+        {
+            LowEndNormalizationCache.Register(1, Rate, Tone(0.1f), 1, 0);
+            LowEndNormalizationCache.Siblings(1, 2);
+            Refresh();
+            float borrowed = LowEndNormalizationCache.Evaluate(2, AudioTuning()).BodyGain;
+            LowEndNormalizationCache.Register(2, Rate, Tone(0.4f), 1, 0);
+            Refresh();
+            var own = LowEndNormalizationCache.Evaluate(2, AudioTuning());
+            Assert.That(own.Ready, Is.True);
+            Assert.That(own.BodyGain, Is.LessThan(borrowed));
+            Assert.That(own.MeasuredRms * own.BodyGain, Is.EqualTo(.1f).Within(.0001));
+        }
+
+        [Test]
+        public void VariantWithoutMeasuredSiblingsStaysUncorrected()
+        {
+            LowEndNormalizationCache.Register(1, Rate, Tone(0.1f), 1, 0);
+            LowEndNormalizationCache.Siblings(2, 3);
+            Refresh();
+            Assert.That(LowEndNormalizationCache.Evaluate(2, AudioTuning()).Ready, Is.False);
+            Assert.That(LowEndNormalizationCache.Evaluate(4, AudioTuning()).Ready, Is.False,
+                "a clip outside any declared bank never borrows");
+            LowEndNormalizationCache.Siblings(1, 2);
+            LowEndNormalizationCache.Clear();
+            LowEndNormalizationCache.Register(1, Rate, Tone(0.1f), 1, 0);
+            Refresh();
+            Assert.That(LowEndNormalizationCache.Evaluate(2, AudioTuning()).Ready, Is.False,
+                "clearing the cache forgets the banks");
         }
 
         private float WarmOne(float[] pcm, int group = 0)
         {
             LowEndNormalizationCache.Clear();
             LowEndNormalizationCache.Register(1, Rate, pcm, 1, group);
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
             return LowEndNormalizationCache.Gain(1, AudioTuning(), out _);
         }
 
@@ -113,7 +165,7 @@ namespace GunsAreLoud.Tests
         {
             LowEndNormalizationCache.Clear();
             LowEndNormalizationCache.Register(1, Rate, pcm, 1, 0);
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
             return LowEndNormalizationCache.Evaluate(1, AudioTuning());
         }
 
@@ -171,7 +223,7 @@ namespace GunsAreLoud.Tests
             float[] bodyOnly = BodyAndDecay(0.3f, 0.3f, 0.40f);
             LowEndNormalizationCache.Clear();
             LowEndNormalizationCache.Register(1, Rate, bodyOnly, 1f, 0, nativeBodySeconds);
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
             LowEndNormalizationResult result = LowEndNormalizationCache.Evaluate(1, AudioTuning());
             Assert.That(result.Ready, Is.True);
             Assert.That(result.DecayReady, Is.False);
@@ -204,7 +256,7 @@ namespace GunsAreLoud.Tests
             float original = WarmOne(Tone(0.1f));
             LowEndNormalizationCache.Register(2, Rate, Tone(0.3f), 1, 0);
             LowEndNormalizationCache.Register(3, Rate, Tone(0.5f), 1, 0);
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
             Assert.That(LowEndNormalizationCache.Gain(1, AudioTuning(), out _),
                 Is.EqualTo(original).Within(0.00001));
         }
@@ -227,7 +279,7 @@ namespace GunsAreLoud.Tests
             float[] first = Tone(0.1f, 240f), second = Tone(0.2f, 560f);
             LowEndNormalizationCache.Register(1, Rate, first, 1, 0);
             LowEndNormalizationCache.Register(2, Rate, second, 1, 0);
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
             float a = LowEndLevelModel.Measure(first, Rate, 0.5f, 35, 260) *
                 LowEndNormalizationCache.Gain(1, AudioTuning(), out _);
             float b = LowEndLevelModel.Measure(second, Rate, 0.5f, 35, 260) *
@@ -241,17 +293,17 @@ namespace GunsAreLoud.Tests
             float[] pistol = Tone(0.3f, 240f), rifle = Tone(0.12f, 400f);
             LowEndNormalizationCache.Register(1, Rate, pistol, 1, 0);
             LowEndNormalizationCache.Register(2, Rate, rifle, 1, 0);
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
             float p = LowEndLevelModel.Measure(pistol, Rate, 0.5f, 35, 260) *
                 LowEndNormalizationCache.Gain(1, AudioTuning(), out _);
             float r = LowEndLevelModel.Measure(rifle, Rate, 0.5f, 35, 260) *
                 LowEndNormalizationCache.Gain(2, AudioTuning(), out _);
             Func<float, float> ratio = contrast =>
-                r * PitchedGunshotLayer.CalculateLayerGain(0.3f, 99, 18, contrast) /
-                (p * PitchedGunshotLayer.CalculateLayerGain(0.3f, 113, 18, contrast));
+                r * PitchedGunshotLayer.CalculateLayerGain(0.3f, -1.1f, 18, contrast) /
+                (p * PitchedGunshotLayer.CalculateLayerGain(0.3f, -6.2f, 18, contrast));
             Assert.That(ratio(0), Is.EqualTo(1).Within(0.00001));
-            Assert.That(ratio(100), Is.GreaterThan(1));
-            Assert.That(ratio(200), Is.GreaterThan(ratio(100)));
+            Assert.That(ratio(3), Is.GreaterThan(1));
+            Assert.That(ratio(6), Is.GreaterThan(ratio(3)));
         }
 
         [Test]
@@ -353,7 +405,7 @@ namespace GunsAreLoud.Tests
             _config.PitchedLayerLowpassHz.Value = 80;
             Assert.That(LowEndNormalizationCache.Gain(1, AudioTuning(), out bool pending), Is.EqualTo(1));
             Assert.That(pending, Is.False);
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
             float after = LowEndNormalizationCache.Gain(1, AudioTuning(), out bool ready);
             Assert.That(ready, Is.True);
             Assert.That(after, Is.GreaterThan(before));
@@ -367,13 +419,13 @@ namespace GunsAreLoud.Tests
             RegisterPair();
             LocalGunshotAudioTuning old = AudioTuning();
             _config.PitchedLayerSemitones.Value = 18;
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
             int passes = LowEndNormalizationCache.MeasurementCount;
             LowEndNormalizationCache.Gain(1, old, out bool oldReady);
             LowEndNormalizationCache.Gain(1, AudioTuning(), out bool newReady);
             Assert.That(oldReady, Is.False);
             Assert.That(newReady, Is.True);
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
             Assert.That(LowEndNormalizationCache.MeasurementCount, Is.EqualTo(passes));
         }
 
@@ -384,11 +436,11 @@ namespace GunsAreLoud.Tests
             LowEndNormalizationCache.Register(2, Rate, Tone(0.2f), 1, 0);
             Assert.That(LowEndNormalizationCache.PendingCount, Is.EqualTo(2));
             for (int pass = 0; pass < 8 && LowEndNormalizationCache.PendingCount > 0; pass++)
-                LowEndNormalizationCache.Refresh(_config.GetTuning());
+                Refresh();
             Assert.That(LowEndNormalizationCache.PendingCount, Is.Zero);
             int measurements = LowEndNormalizationCache.MeasurementCount;
             for (int pass = 0; pass < 100; pass++)
-                LowEndNormalizationCache.Refresh(_config.GetTuning());
+                Refresh();
             Assert.That(LowEndNormalizationCache.MeasurementCount, Is.EqualTo(measurements));
             Assert.That(LowEndNormalizationCache.PendingCount, Is.Zero);
         }
@@ -404,7 +456,7 @@ namespace GunsAreLoud.Tests
             _config.PitchedLayerOcclusion.Value = PitchedLayerOcclusionMode.Enhanced;
             _config.PitchedLayerOccludedLowpassHz.Value = 50;
             _config.HeadphonesFit.Value = HeadphonesFitPreset.Tight;
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
             Assert.That(LowEndNormalizationCache.Gain(1, AudioTuning(), out _), Is.EqualTo(before));
             Assert.That(LowEndNormalizationCache.MeasurementCount, Is.EqualTo(passes));
             Assert.That(AudioTuning().PitchedLayerGainDb, Is.EqualTo(30));
@@ -421,7 +473,7 @@ namespace GunsAreLoud.Tests
             LowEndNormalizationCache.Register(1, Rate, Tone(0.2f), 1, 0);
             LowEndNormalizationCache.Register(2, Rate, Tone(0.01f), 1, 1);
             LowEndNormalizationCache.Register(3, Rate, Tone(0.4f), 1, 2);
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
             for (int i = 1; i <= 3; i++)
             {
                 LowEndNormalizationResult result = LowEndNormalizationCache.Evaluate(i, AudioTuning());
@@ -438,7 +490,7 @@ namespace GunsAreLoud.Tests
             LowEndNormalizationCache.Register(1, Rate, BodyAndDecay(0.2f, 0.03f), 0.5f, 0);
             LowEndNormalizationCache.Register(2, Rate, BodyAndDecay(0.2f, 0.03f), 1f, 0);
             LowEndNormalizationCache.Alias(3, 1);
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
             LowEndNormalizationResult a = LowEndNormalizationCache.Evaluate(1, AudioTuning());
             LowEndNormalizationResult b = LowEndNormalizationCache.Evaluate(2, AudioTuning());
             LowEndNormalizationResult alias = LowEndNormalizationCache.Evaluate(3, AudioTuning());
@@ -459,14 +511,18 @@ namespace GunsAreLoud.Tests
             float body = DirectLoudnessModel.CalculatePitchedBodyGain(pistol, tuning);
             Assert.That(DirectLoudnessModel.CalculatePitchedBodyGain(rifle, tuning), Is.EqualTo(body));
             Func<float, float> ratio = contrast =>
-                PitchedGunshotLayer.CalculateLayerGain(body, 99, 0, contrast) /
-                PitchedGunshotLayer.CalculateLayerGain(body, 113, 0, contrast);
+                PitchedGunshotLayer.CalculateLayerGain(body, -1.1f, 0, contrast) /
+                PitchedGunshotLayer.CalculateLayerGain(body, -6.2f, 0, contrast);
             Assert.That(ratio(0), Is.EqualTo(1));
-            Assert.That(ratio(100), Is.GreaterThan(1));
-            Assert.That(ratio(200), Is.EqualTo(ratio(100) * ratio(100)).Within(0.00001));
-            Assert.That(ratio(300), Is.EqualTo(ratio(100) * ratio(100) * ratio(100)).Within(0.00001));
+            Assert.That(ratio(3), Is.EqualTo((float)Math.Pow(10.0, 3.0 / 20.0)).Within(0.00001));
+            Assert.That(ratio(6), Is.EqualTo(ratio(3) * ratio(3)).Within(0.00001));
+            // At 9 dB the -8 dB bound holds the 9x19 round: the gap stops short of 9 dB.
+            Assert.That(ratio(9), Is.EqualTo((float)Math.Pow(10.0, (-1.1 * 9.0 / 5.1 + 8.0) / 20.0)).Within(0.00001));
+            Assert.That(ratio(9), Is.LessThan(ratio(3) * ratio(3) * ratio(3)));
+            // A suppressor is in the shot's level, not in the copy's body: the
+            // whole event moves through the direct correction.
             rifle.IsSuppressed = true;
-            Assert.That(DirectLoudnessModel.CalculatePitchedBodyGain(rifle, tuning), Is.LessThan(body));
+            Assert.That(DirectLoudnessModel.CalculatePitchedBodyGain(rifle, tuning), Is.EqualTo(body));
         }
 
         [Test]
@@ -477,7 +533,7 @@ namespace GunsAreLoud.Tests
                 { SaveOnConfigSet = false });
 
             Assert.That(release.LowEndNormalizationDb.Value, Is.EqualTo(12));
-            Assert.That(release.CartridgeContrastDb.Value, Is.EqualTo(6));
+            Assert.That(release.CartridgeContrastDb.Value, Is.EqualTo(3));
             Assert.That(release.PitchedLayerLowpassHz.Value, Is.EqualTo(2000));
             Assert.That(release.AutomaticPitchedTailMs.Value, Is.EqualTo(30));
             Assert.That(((AcceptableValueRange<float>)release.LowEndNormalizationDb.Description.AcceptableValues).MaxValue, Is.EqualTo(18));
@@ -516,9 +572,9 @@ namespace GunsAreLoud.Tests
             LowEndNormalizationCache.Clear();
             int first = reverse ? 2 : 1, second = reverse ? 1 : 2;
             LowEndNormalizationCache.Register(first, Rate, Tone(first * 0.1f), 1, 0);
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
             LowEndNormalizationCache.Register(second, Rate, Tone(second * 0.1f), 1, 0);
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
             Assert.That(LowEndNormalizationCache.Gain(1, AudioTuning(), out _), Is.EqualTo(expected));
             Assert.That(WarmOne(Tone(0.1f)), Is.EqualTo(expected));
         }
@@ -546,7 +602,7 @@ namespace GunsAreLoud.Tests
             _config.PitchedLayerSemitones.Value = 7.586855f;
             _config.PitchedLayerHighpassHz.Value = 71.26761f;
             _config.PitchedLayerLowpassHz.Value = 683.9437f;
-            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            Refresh();
             LowEndNormalizationResult result = LowEndNormalizationCache.Evaluate(1, AudioTuning());
             Assert.That(result.TargetRms, Is.EqualTo(target));
             Assert.That(result.MeasuredRms * result.Gain, Is.EqualTo(target).Within(0.00001));
@@ -563,16 +619,54 @@ namespace GunsAreLoud.Tests
             return pcm;
         }
 
-        private void Drain()
+        private void Drain() => LowEndNormalizationCache.CompletePending(_config.GetTuning());
+
+        [Test]
+        public void ARefreshHandsTheMeasurementToTheWorkerAndALaterOnePublishesIt()
         {
-            // The first pass is unconditional: it is what publishes an F12 band
-            // change, and only then is there anything pending to measure.
-            TuningSnapshot tuning = _config.GetTuning();
-            for (int pass = 0; pass < 64; pass++)
-            {
-                LowEndNormalizationCache.Refresh(tuning);
-                if (LowEndNormalizationCache.PendingCount == 0) break;
-            }
+            LowEndNormalizationCache.Register(1, Rate, Tone(0.1f), 1, 0);
+            Assert.That(LowEndNormalizationCache.PendingCount, Is.EqualTo(1));
+            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            // Whatever the thread has done by now, the source is current only
+            // once a refresh has published it, and the count says so until then.
+            Assert.That(LowEndNormalizationCache.IsCurrent(1) || LowEndNormalizationCache.PendingCount == 1, Is.True);
+            LowEndNormalizationCache.CompletePending(_config.GetTuning());
+            Assert.That(LowEndNormalizationCache.IsCurrent(1), Is.True);
+            Assert.That(LowEndNormalizationCache.PendingCount, Is.EqualTo(0));
+            Assert.That(LowEndNormalizationCache.MeasurementCount, Is.EqualTo(1));
+            Assert.That(LowEndNormalizationCache.Evaluate(1, AudioTuning()).Ready, Is.True);
+        }
+
+        [Test]
+        public void AMeasurementOvertakenByABandChangeIsMeasuredAgainInTheNewBand()
+        {
+            LowEndNormalizationCache.Register(1, Rate, Tone(0.1f), 1, 0);
+            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            // The band changes while (or after) the first measurement runs.
+            _config.PitchedLayerLowpassHz.Value = 683.9437f;
+            LowEndNormalizationCache.CompletePending(_config.GetTuning());
+            Assert.That(LowEndNormalizationCache.IsCurrent(1), Is.True);
+            Assert.That(LowEndNormalizationCache.Evaluate(1, AudioTuning()).Ready, Is.True,
+                "the levels are published for the band in force, never for the one they were started in");
+            Assert.That(LowEndNormalizationCache.MeasurementCount, Is.EqualTo(1),
+                "a stale measurement is dropped, not counted");
+        }
+
+        [Test]
+        public void ClearingWhileAMeasurementRunsDropsItsResult()
+        {
+            LowEndNormalizationCache.Register(1, Rate, Tone(0.1f), 1, 0);
+            LowEndNormalizationCache.Refresh(_config.GetTuning());
+            LowEndNormalizationCache.Clear();
+            LowEndNormalizationCache.Register(1, Rate, Tone(0.2f), 1, 0);
+            LowEndNormalizationCache.Register(2, Rate, Tone(0.1f), 1, 0);
+            LowEndNormalizationCache.CompletePending(_config.GetTuning());
+            Assert.That(LowEndNormalizationCache.MeasurementCount, Is.EqualTo(2));
+            LowEndNormalizationResult result = LowEndNormalizationCache.Evaluate(1, AudioTuning());
+            LowEndNormalizationResult reference = LowEndNormalizationCache.Evaluate(2, AudioTuning());
+            Assert.That(result.Ready && reference.Ready, Is.True);
+            Assert.That(result.MeasuredRms, Is.EqualTo(reference.MeasuredRms * 2).Within(reference.MeasuredRms * 0.01),
+                "the level is the second registration's, not the cleared one's");
         }
 
         // One registration retains the truncated analysis prefix, so the number
@@ -639,22 +733,28 @@ namespace GunsAreLoud.Tests
             Assert.That(retained.Ready, Is.True, "A prefix still inside the budget re-measures for the new band.");
         }
 
-        [TestCase("545x39", 0, 0)]
-        [TestCase("545x39", 100, 3)]
-        [TestCase("545x39", 200, 6)]
-        [TestCase("762x39", 100, 3)]
-        [TestCase("762x39", 200, 6)]
+        // 9x19 at 433 J (L_E -6.18 dB) against 5.45x39 at 1377 J (L_E -1.16 dB)
+        // and 7.62x39 at 2048 J (L_E +0.56 dB): the contrast scaled by the
+        // energy gap over 5.1 dB, so just under the setting for this 5.45
+        // round, more for the heavier 7.62, and linear in the setting.
+        [TestCase(3.4f, 900f, 0f, 0)]
+        [TestCase(3.4f, 900f, 3f, 2.953)]
+        [TestCase(3.4f, 900f, 6f, 5.905)]
+        [TestCase(7.9f, 720f, 3f, 3.966)]
+        [TestCase(7.9f, 720f, 6f, 7.933)]
         public void ActualCartridgeModelGivesRiflesSpecifiedContrastOverVityaz(
-            string rifleCaliber, float contrast, float expectedDb)
+            float rifleMassGram, float rifleVelocity, float contrast, double expectedDb)
         {
             TuningSnapshot t = _config.GetTuning();
-            var pistol = new ShotDescriptor { AmmoCaliber = "9x19PARA", IsIndoor = true };
-            var rifle = new ShotDescriptor { AmmoCaliber = rifleCaliber, IsIndoor = true };
+            var pistol = new ShotDescriptor { PayloadMassGram = 7.5f, MuzzleVelocity = 340f,
+                MuzzleDistance = 0.65f, IsIndoor = true };
+            var rifle = new ShotDescriptor { PayloadMassGram = rifleMassGram, MuzzleVelocity = rifleVelocity,
+                MuzzleDistance = 0.9f, IsIndoor = true };
             Func<ShotDescriptor, float> gain = shot => PitchedGunshotLayer.CalculateLayerGain(
                 DirectLoudnessModel.CalculatePitchedBodyGain(shot, t),
-                DirectLoudnessModel.CalculatePressureFrequencyHz(ExposureModel.Calculate(shot, t), t),
+                ExposureModel.Calculate(shot, t).EnergyIndex,
                 0, contrast);
-            Assert.That(20 * Math.Log10(gain(rifle) / gain(pistol)), Is.EqualTo(expectedDb).Within(0.001));
+            Assert.That(20 * Math.Log10(gain(rifle) / gain(pistol)), Is.EqualTo(expectedDb).Within(0.02));
         }
     }
 }

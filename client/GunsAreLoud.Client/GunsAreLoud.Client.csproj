@@ -13,6 +13,9 @@
   <ItemGroup>
     <EmbeddedResource Include="Assets\gal_headphone_mixer" LogicalName="GunsAreLoud.Client.Assets.gal_headphone_mixer" />
     <EmbeddedResource Include="Assets\headphone-mixer-stock-contract.txt" LogicalName="GunsAreLoud.Client.Assets.headphone-mixer-stock-contract.txt" />
+    <!-- The variant installed into Sound Engine Backport's live mixer slot. -->
+    <EmbeddedResource Include="Assets\gal_headphone_mixer_live" LogicalName="GunsAreLoud.Client.Assets.gal_headphone_mixer_live" />
+    <EmbeddedResource Include="Assets\headphone-mixer-live-contract.txt" LogicalName="GunsAreLoud.Client.Assets.headphone-mixer-live-contract.txt" />
   </ItemGroup>
 
   <ItemGroup>

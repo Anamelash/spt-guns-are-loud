@@ -27,6 +27,24 @@ namespace GunsAreLoud.Client.Runtime
 
     // Parameter contract of the replacement MasterMixer. Every parameter is
     // validated before the first write; any failed write restores the snapshot.
+    /// <summary>
+    /// What a headset route owns beyond the stock mixer's parameters, on a
+    /// host's mixer that has more of them: the host's own ambient trim stays
+    /// the user's, and parameters the host lowers for a worn headset are held
+    /// neutral, since in Realistic the passive bus is that headset.
+    /// </summary>
+    internal sealed class HeadphoneRouteOverrides
+    {
+        internal Func<float> AmbientVolumeDb;
+        internal string[] NeutralParameters = Array.Empty<string>();
+
+        internal static HeadphoneRouteOverrides ForHost(Engine.IMixerHost host) => new HeadphoneRouteOverrides
+        {
+            AmbientVolumeDb = () => Math.Max(-80f, host.AmbientTrimDb),
+            NeutralParameters = host.NeutralRouteParameters ?? Array.Empty<string>()
+        };
+    }
+
     internal sealed class TransactionalMixerHeadphoneRoute : IHeadphoneRouteBackend
     {
         internal const string PassiveVolume = "GAL_PassiveVolume";
@@ -95,19 +113,28 @@ namespace GunsAreLoud.Client.Runtime
         private Dictionary<string, float> _expected;
         private bool _restorePending;
         private int _resetGeneration;
+        private readonly HeadphoneRouteOverrides _overrides;
+        private readonly string[] _owned;
 
         internal TransactionalMixerHeadphoneRoute(IMixerParameterStore mixer)
             : this(mixer, AudioSettings.outputSampleRate, HeadphoneNativeEqCacheProvider.Instance) { }
 
-        internal TransactionalMixerHeadphoneRoute(IMixerParameterStore mixer, int sampleRate)
-            : this(mixer, sampleRate, HeadphoneNativeEqCacheProvider.Instance) { }
+        internal TransactionalMixerHeadphoneRoute(IMixerParameterStore mixer, int sampleRate,
+            HeadphoneRouteOverrides overrides = null)
+            : this(mixer, sampleRate, HeadphoneNativeEqCacheProvider.Instance, overrides) { }
 
         internal TransactionalMixerHeadphoneRoute(IMixerParameterStore mixer, int sampleRate,
-            IHeadphoneNativeEqProvider fits)
+            IHeadphoneNativeEqProvider fits, HeadphoneRouteOverrides overrides = null)
         {
             _mixer = mixer;
             _sampleRate = Math.Max(8000, sampleRate);
             _fits = fits ?? HeadphoneNativeEqCacheProvider.Instance;
+            _overrides = overrides;
+            var owned = new List<string>(Required);
+            if (overrides?.NeutralParameters != null)
+                foreach (string name in overrides.NeutralParameters)
+                    if (!owned.Contains(name)) owned.Add(name);
+            _owned = owned.ToArray();
         }
 
         public bool TryActivate(HeadsetProfile profile, HeadsetSendLevels sends, out string reason)
@@ -125,6 +152,7 @@ namespace GunsAreLoud.Client.Runtime
             // Character control) keeps them: a restart there would be heard as
             // a jump in gain on every step of the slider.
             var values = BuildValues(profile, fit, _resetGeneration, sends);
+            ApplyOverrides(values);
             if (!OnlyColouringChanged(values))
                 values[ElectronicsReset] = _resetGeneration == 16777215 ? 1 : _resetGeneration + 1;
             int nextReset = (int)values[ElectronicsReset];
@@ -192,7 +220,7 @@ namespace GunsAreLoud.Client.Runtime
             var text = new System.Text.StringBuilder();
             text.Append("active=").Append(_active)
                 .Append(" restorePending=").Append(_restorePending);
-            foreach (string name in Required)
+            foreach (string name in _owned)
             {
                 text.Append(' ').Append(name).Append('=');
                 if (_mixer.TryGet(name, out float value)) text.Append(value.ToString("0.###"));
@@ -225,7 +253,7 @@ namespace GunsAreLoud.Client.Runtime
         {
             if (_active) { reason = ""; return true; }
             _vanilla.Clear();
-            foreach (string name in Required)
+            foreach (string name in _owned)
             {
                 if (!_mixer.TryGet(name, out float value))
                 { _vanilla.Clear(); reason = "required mixer parameter missing: " + name; return false; }
@@ -252,6 +280,18 @@ namespace GunsAreLoud.Client.Runtime
             }
             else _restorePending = true;
             return ok;
+        }
+
+        private void ApplyOverrides(Dictionary<string, float> values)
+        {
+            if (_overrides == null) return;
+            if (_overrides.AmbientVolumeDb != null)
+            {
+                float ambient = _overrides.AmbientVolumeDb();
+                if (!float.IsNaN(ambient) && !float.IsInfinity(ambient)) values["AmbientVolume"] = ambient;
+            }
+            if (_overrides.NeutralParameters != null)
+                foreach (string name in _overrides.NeutralParameters) values[name] = 0f;
         }
 
         private static Dictionary<string, float> BuildValues(HeadsetProfile profile,

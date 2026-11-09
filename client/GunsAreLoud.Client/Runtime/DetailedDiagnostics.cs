@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -391,10 +391,18 @@ namespace GunsAreLoud.Client.Runtime
             return true;
         }
 
-        internal bool TryBeginLocalShot(out DiagnosticShotToken token)
+        internal bool TryBeginLocalShot(out DiagnosticShotToken token) =>
+            TryBeginToken(DiagnosticEventKind.LocalShot, out token);
+
+        /// <summary>
+        /// A reservation that later events refer back to (the listener probe
+        /// of a shot or an explosion): the token stays active until the session
+        /// is reset.
+        /// </summary>
+        internal bool TryBeginToken(DiagnosticEventKind kind, out DiagnosticShotToken token)
         {
             token = default;
-            if (!TryBegin(DiagnosticEventKind.LocalShot, out DiagnosticReservation reservation))
+            if (!TryBegin(kind, out DiagnosticReservation reservation))
                 return false;
             token = new DiagnosticShotToken(
                 Interlocked.Increment(ref _nextShotId),
@@ -686,6 +694,14 @@ namespace GunsAreLoud.Client.Runtime
         {
             DetailedDiagnosticSession session = Volatile.Read(ref _session);
             if (session != null) return session.TryBeginLocalShot(out token);
+            token = default;
+            return false;
+        }
+
+        internal static bool TryBeginToken(DiagnosticEventKind kind, out DiagnosticShotToken token)
+        {
+            DetailedDiagnosticSession session = Volatile.Read(ref _session);
+            if (session != null) return session.TryBeginToken(kind, out token);
             token = default;
             return false;
         }

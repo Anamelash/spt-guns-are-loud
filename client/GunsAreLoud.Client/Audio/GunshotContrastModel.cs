@@ -19,7 +19,9 @@ namespace GunsAreLoud.Client.Audio
             "PrecipitationAmbientOut", "OutEnvironment", "AmbientOutDay", "AmbientOutNight",
             "AmbientOutDayEffects", "AmbientOutDayBypass", "AmbientOutNightEffects", "AmbientOutNightBypass",
             "RadioIn", "RadioInLessVerb", "RadioOut", "EventRadio", "VehicleInRadio",
-            "Occlusion", "LowerOccluded", "UpperOccluded", "SimpleOccluded"
+            "Occlusion", "LowerOccluded", "UpperOccluded", "SimpleOccluded",
+            // Only in Sound Engine Backport's live mixer; see LiveOnlyRoutes.
+            "AmbientInRoomTone", "AmbCutsceneCommonEffects", "AmbFirefight", "Impacts"
         };
 
         internal static bool ShouldAttenuate(string group) => group != null && AttenuatedGroups.Contains(group);

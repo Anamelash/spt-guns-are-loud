@@ -111,6 +111,7 @@ namespace GunsAreLoud.Client.Runtime
         PitchedTail,
         PitchedEnvelope,
         Hearing,
+        DirectLevel,
         Count
     }
 
@@ -389,6 +390,7 @@ namespace GunsAreLoud.Client.Runtime
                 case AudioFilterKind.PitchedBand: return "pitchedBand";
                 case AudioFilterKind.PitchedTail: return "pitchedTail";
                 case AudioFilterKind.PitchedEnvelope: return "pitchedEnvelope";
+                case AudioFilterKind.DirectLevel: return "directLevel";
                 default: return "hearing";
             }
         }

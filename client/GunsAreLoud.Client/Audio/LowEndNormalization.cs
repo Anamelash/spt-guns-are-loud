@@ -91,6 +91,46 @@ namespace GunsAreLoud.Client.Audio
         internal static float Measure(float[] stereo, int rate, float pitch, float highpass, float lowpass)
             => MeasureBands(stereo, rate, pitch, highpass, lowpass).Wide;
 
+        internal const float MaximumMeasuredBodySeconds = 0.30f;
+
+        /// <summary>
+        /// The attack of a whole-shot recording, in native seconds from its
+        /// onset: 10 ms RMS envelope, its peak, and the first block after it
+        /// that is 20 dB down. Bounded to [half the body window, 0.30 s]; the
+        /// lower bound is today's window at pitch 0.5, so a short attack keeps
+        /// the old switch point. 0 when there is nothing to measure.
+        /// </summary>
+        internal static float EstimateBodySeconds(float[] stereo, int rate)
+        {
+            if (stereo == null || stereo.Length < 4 || rate < 8000) return 0f;
+            int frames = stereo.Length / 2;
+            float peak = 0f;
+            for (int i = 0; i < stereo.Length; i++) peak = Math.Max(peak, Math.Abs(stereo[i]));
+            if (peak < 0.00005f) return 0f;
+            float threshold = Math.Max(0.00005f, peak * 0.01f);
+            int onset = 0;
+            while (onset < frames && Math.Max(Math.Abs(stereo[onset * 2]),
+                Math.Abs(stereo[onset * 2 + 1])) < threshold) onset++;
+            int block = Math.Max(1, rate / 100);
+            int blocks = (frames - onset) / block;
+            if (blocks < 2) return 0f;
+            var envelope = new double[blocks];
+            int peakBlock = 0;
+            for (int b = 0; b < blocks; b++)
+            {
+                double energy = 0;
+                int first = (onset + b * block) * 2;
+                for (int i = 0; i < block * 2; i++) energy += stereo[first + i] * (double)stereo[first + i];
+                envelope[b] = Math.Sqrt(energy / (block * 2));
+                if (envelope[b] > envelope[peakBlock]) peakBlock = b;
+            }
+            double limit = envelope[peakBlock] * 0.1;
+            float seconds = MaximumMeasuredBodySeconds;
+            for (int b = peakBlock + 1; b < blocks; b++)
+                if (envelope[b] < limit) { seconds = b * block / (float)rate; break; }
+            return Math.Min(MaximumMeasuredBodySeconds, Math.Max(WindowSeconds * 0.5f, seconds));
+        }
+
         internal static LowEndBandLevels MeasureBands(float[] stereo, int rate, float pitch, float highpass, float lowpass)
         {
             if (stereo == null || stereo.Length < 4 || rate < 8000) return default;
@@ -192,9 +232,24 @@ namespace GunsAreLoud.Client.Audio
             internal float DecayLevel;
             internal bool DecayReady;
             internal float NativeBodySeconds;
+            internal string BodySource = "default";
             internal int Revision = -1;
             internal bool Queued;
+            // A sibling estimate only: measured siblings it was built from and
+            // the measurement count it was built at.
+            internal int Siblings;
+            internal int Stamp = -1;
+            // The band the levels above were measured in, and the persistent
+            // cache entry they are written to (null: not cached).
+            internal bool HasBand;
+            internal float BandPitch, BandHigh, BandLow;
+            internal string CacheKey;
+            // The copy and its aligned sum with the recording, as the sum meter
+            // measured them in this band (raw units: no volume, no gain).
+            internal ShotSumMeasure Sum;
         }
+
+        internal const string SiblingBodySource = "sibling";
 
         // Analysis PCM is only needed to re-measure after an F12 band change.
         // A long raid with many banks would otherwise keep every prefix alive:
@@ -205,24 +260,159 @@ namespace GunsAreLoud.Client.Audio
         private static readonly Dictionary<int, int> Aliases = new Dictionary<int, int>();
         private static readonly Queue<Source> Pending = new Queue<Source>();
         private static readonly List<Source> Retained = new List<Source>();
+        // The variants of one bank in one environment, by clip id. A variant
+        // played before its own warm-up finished borrows its measured
+        // siblings' level instead of playing uncorrected.
+        private static readonly Dictionary<int, int[]> SiblingSets = new Dictionary<int, int[]>();
+        private static readonly Dictionary<int, Source> SiblingEstimates = new Dictionary<int, Source>();
         private static long _retainedSamples;
         private static float _pitch, _high, _low;
         private static int _revision;
         internal static int SourceCount => Sources.Count;
-        internal static int PendingCount => Pending.Count;
+        /// <summary>Sources queued, being measured, or measured and not yet published.</summary>
+        internal static int PendingCount => Pending.Count + Volatile.Read(ref _inFlight) + FinishedCount;
         internal static long RetainedSamples => _retainedSamples;
         internal static int MeasurementCount { get; private set; }
 
         internal static bool Contains(AudioClip clip) => clip != null && Sources.ContainsKey(clip.GetInstanceID());
 
-        internal static void Register(AudioClip clip, int rate, float[] pcm, float volume, int group,
-            float nativeBodySeconds = 0f)
+        /// <summary>The clip has levels measured in the current analysis band.</summary>
+        internal static bool IsCurrent(AudioClip clip) => clip != null && IsCurrent(clip.GetInstanceID());
+
+        internal static bool IsCurrent(int id) =>
+            Sources.TryGetValue(id, out Source source) && source.Revision == _revision;
+
+        /// <summary>
+        /// Declares the clips as variants of one bank in one environment: until
+        /// one of them is measured it is corrected by the geometric mean of the
+        /// measured others. Re-declaring the same set is free.
+        /// </summary>
+        internal static void Siblings(AudioClip[] clips)
         {
-            if (clip != null) Register(clip.GetInstanceID(), rate, pcm, volume, group, nativeBodySeconds);
+            if (clips == null) return;
+            int count = 0;
+            int[] existing = null;
+            bool known = true;
+            foreach (AudioClip clip in clips)
+            {
+                if (clip == null) continue;
+                count++;
+                if (!SiblingSets.TryGetValue(clip.GetInstanceID(), out int[] set)) known = false;
+                else if (existing == null) existing = set;
+                else if (!ReferenceEquals(existing, set)) known = false;
+            }
+            if (count < 2 || known && existing != null && existing.Length == count) return;
+            var ids = new int[count];
+            int index = 0;
+            foreach (AudioClip clip in clips)
+                if (clip != null) ids[index++] = clip.GetInstanceID();
+            DeclareSiblings(ids);
+        }
+
+        internal static void Siblings(params int[] ids)
+        {
+            if (ids != null) DeclareSiblings((int[])ids.Clone());
+        }
+
+        private static void DeclareSiblings(int[] ids)
+        {
+            if (ids.Length < 2) return;
+            foreach (int id in ids)
+            {
+                SiblingSets[id] = ids;
+                SiblingEstimates.Remove(id);
+            }
+        }
+
+        /// <summary>
+        /// The level a variant that is not measured yet borrows from its
+        /// measured siblings (geometric means), or null when none is measured.
+        /// </summary>
+        private static Source SiblingEstimate(int id)
+        {
+            if (!SiblingSets.TryGetValue(id, out int[] set)) return null;
+            if (SiblingEstimates.TryGetValue(id, out Source cached) &&
+                cached.Revision == _revision && cached.Stamp == MeasurementCount)
+                return cached.Siblings > 0 ? cached : null;
+            int measured = 0, decayMeasured = 0, summed = 0, lossSummed = 0;
+            double level = 0, bass = 0, decay = 0, bodySeconds = 0, copyPeak = 0, copyAttack = 0;
+            var sums = new double[ShotSumRatios.Values.Length];
+            var lossSums = new double[ShotSumRatios.LossLength];
+            Source first = null;
+            foreach (int other in set)
+            {
+                if (other == id || !Sources.TryGetValue(other, out Source sibling) ||
+                    sibling.Revision != _revision) continue;
+                if (first == null) first = sibling;
+                measured++;
+                level += Math.Log(Math.Max(sibling.Level, 1e-9f));
+                bass += Math.Log(Math.Max(sibling.BassLevel, 1e-9f));
+                bodySeconds += sibling.NativeBodySeconds;
+                if (sibling.Sum.Valid)
+                {
+                    summed++;
+                    copyPeak += sibling.Sum.CopyPeak;
+                    copyAttack += sibling.Sum.CopyAttackDb;
+                    for (int point = 0; point < sums.Length; point++) sums[point] += sibling.Sum.SumPeaks[point];
+                    if (sibling.Sum.HasLoss)
+                    {
+                        lossSummed++;
+                        for (int cell = 0; cell < lossSums.Length; cell++) lossSums[cell] += sibling.Sum.LimitLoss[cell];
+                    }
+                }
+                if (!sibling.DecayReady) continue;
+                decayMeasured++;
+                decay += Math.Log(Math.Max(sibling.DecayLevel, 1e-9f));
+            }
+            var estimate = new Source { Id = id, Revision = _revision, Stamp = MeasurementCount,
+                Siblings = measured, BodySource = SiblingBodySource };
+            if (first != null)
+            {
+                estimate.Rate = first.Rate;
+                estimate.Group = first.Group;
+                estimate.Volume = first.Volume;
+                estimate.Level = (float)Math.Exp(level / measured);
+                estimate.BassLevel = (float)Math.Exp(bass / measured);
+                estimate.NativeBodySeconds = (float)(bodySeconds / measured);
+                estimate.DecayReady = decayMeasured > 0;
+                estimate.DecayLevel = decayMeasured > 0 ? (float)Math.Exp(decay / decayMeasured) : 0f;
+                if (summed > 0)
+                {
+                    var meanSums = new float[sums.Length];
+                    for (int point = 0; point < sums.Length; point++) meanSums[point] = (float)(sums[point] / summed);
+                    float[] meanLoss = null;
+                    if (lossSummed > 0)
+                    {
+                        meanLoss = new float[lossSums.Length];
+                        for (int cell = 0; cell < lossSums.Length; cell++) meanLoss[cell] = (float)(lossSums[cell] / lossSummed);
+                    }
+                    estimate.Sum = new ShotSumMeasure((float)(copyPeak / summed), (float)(copyAttack / summed), meanSums, meanLoss);
+                }
+            }
+            SiblingEstimates[id] = estimate;
+            return measured > 0 ? estimate : null;
+        }
+
+        internal static void Register(AudioClip clip, int rate, float[] pcm, float volume, int group,
+            float nativeBodySeconds = 0f, string bodySource = null, string cacheKey = null, bool keepMeasured = true)
+        {
+            if (clip != null)
+                Register(clip.GetInstanceID(), rate, pcm, volume, group, nativeBodySeconds, bodySource, cacheKey, keepMeasured);
+        }
+
+        /// <summary>Where the clip's body length came from: loopBeat, measured or default.</summary>
+        internal static string BodySource(AudioClip clip)
+        {
+            if (clip == null) return "none";
+            int id = clip.GetInstanceID();
+            if (Aliases.TryGetValue(id, out int body)) id = body;
+            if (Sources.TryGetValue(id, out Source source) && source.Revision == _revision) return source.BodySource;
+            if (SiblingEstimate(id) != null) return SiblingBodySource;
+            return source != null ? source.BodySource : "none";
         }
 
         internal static void Register(int id, int rate, float[] pcm, float volume, int group,
-            float nativeBodySeconds = 0f)
+            float nativeBodySeconds = 0f, string bodySource = null, string cacheKey = null, bool keepMeasured = true)
         {
             if (pcm == null || pcm.Length < 4 || rate < 8000) return;
             // Keep only the analysis prefix, not multi-second tails. It is raw,
@@ -232,8 +422,30 @@ namespace GunsAreLoud.Client.Audio
             var prefix = new float[samples];
             Array.Copy(pcm, prefix, samples);
             var source = new Source { Id = id, Pcm = prefix, Rate = rate, Volume = volume, Group = group,
-                NativeBodySeconds = Math.Max(0f, nativeBodySeconds) };
-            if (Sources.TryGetValue(id, out Source replaced)) ReleasePcm(replaced);
+                NativeBodySeconds = Math.Max(0f, nativeBodySeconds),
+                BodySource = bodySource ?? (nativeBodySeconds > 0f ? "loopBeat" : "default"), CacheKey = cacheKey };
+            if (Sources.TryGetValue(id, out Source replaced))
+            {
+                ReleasePcm(replaced);
+                // The same event already measured in this band (from the
+                // persistent cache, and confirmed by the caller): keep its levels, so the copy stays ready,
+                // and hold the samples only for a later band change.
+                if (keepMeasured && cacheKey != null && replaced.CacheKey == cacheKey && replaced.Revision == _revision &&
+                    replaced.HasBand && replaced.BandPitch == _pitch && replaced.BandHigh == _high &&
+                    replaced.BandLow == _low)
+                {
+                    source.Level = replaced.Level;
+                    source.BassLevel = replaced.BassLevel;
+                    source.DecayLevel = replaced.DecayLevel;
+                    source.DecayReady = replaced.DecayReady;
+                    source.HasBand = true;
+                    source.BandPitch = replaced.BandPitch;
+                    source.BandHigh = replaced.BandHigh;
+                    source.BandLow = replaced.BandLow;
+                    source.Sum = replaced.Sum;
+                    source.Revision = _revision;
+                }
+            }
             Sources[id] = source;
             Retained.Add(source);
             _retainedSamples += prefix.Length;
@@ -272,32 +484,211 @@ namespace GunsAreLoud.Client.Audio
         {
             if (tuning == null) return;
             SetBand(tuning.PitchedLayerSemitones, tuning.PitchedLayerHighpassHz, tuning.PitchedLayerLowpassHz);
-            // Only changed/new entries are queued. One measurement is indivisible,
-            // so the budget is checked after every one of them: a frame pays for
-            // at most one measurement plus whatever fits in a millisecond. A band
-            // change re-queues every source, and that used to cost four of them in
-            // one frame whatever they were worth.
-            const int minimumMeasurements = 1;
-            const int maximumMeasurements = 8;
-            const double timeBudgetMilliseconds = 1.0;
-            long start = Stopwatch.GetTimestamp();
-            int measured = 0;
-            while (Pending.Count > 0 && measured < maximumMeasurements)
+            Publish();
+            // A measurement is arithmetic over the retained prefix and nothing
+            // else, so it runs on the measurement thread; a frame pays only for
+            // handing the queue over and for publishing what has come back. A
+            // weapon's bank is thirty-odd recordings, and one of them costs
+            // several milliseconds with the limiter loss table.
+            while (Pending.Count > 0)
             {
                 Source source = Pending.Dequeue();
-                source.Queued = false;
                 if (!Sources.TryGetValue(source.Id, out Source current) ||
                     !ReferenceEquals(current, source) ||
                     source.Pcm == null ||
                     source.Revision == _revision)
+                {
+                    source.Queued = false;
                     continue;
-                Measure(source);
-                measured++;
-                if (measured >= minimumMeasurements &&
-                    (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency >=
-                    timeBudgetMilliseconds)
-                    break;
+                }
+                // Queued stays set until the result is published, so a band
+                // change meanwhile does not queue the source a second time.
+                Submit(new MeasurementJob
+                {
+                    Source = source, Pcm = source.Pcm, Rate = source.Rate, Volume = source.Volume,
+                    NativeBodySeconds = source.NativeBodySeconds, Pitch = _pitch, High = _high, Low = _low
+                });
             }
+        }
+
+        /// <summary>
+        /// Measures everything queued before returning: hands the queue over,
+        /// waits for the measurement thread and publishes. For tests and tools;
+        /// the game never waits.
+        /// </summary>
+        internal static void CompletePending(TuningSnapshot tuning, int timeoutMilliseconds = 30000)
+        {
+            long start = Stopwatch.GetTimestamp();
+            for (;;)
+            {
+                Refresh(tuning);
+                if (PendingCount == 0) return;
+                if ((Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency > timeoutMilliseconds)
+                    throw new TimeoutException("level measurements did not complete in time");
+                Thread.Sleep(1);
+            }
+        }
+
+        // ----- measurement thread -----
+
+        private sealed class MeasurementJob
+        {
+            internal Source Source;
+            internal float[] Pcm;
+            internal int Rate;
+            internal float Volume, NativeBodySeconds;
+            internal float Pitch, High, Low;
+            internal float Level, BassLevel, DecayLevel;
+            internal bool DecayReady;
+            internal ShotSumMeasure Sum;
+            internal string Failure;
+        }
+
+        private static readonly Queue<MeasurementJob> Jobs = new Queue<MeasurementJob>();
+        private static readonly Queue<MeasurementJob> Finished = new Queue<MeasurementJob>();
+        private static Thread _worker;
+        private static int _inFlight;
+        // Measures on the calling thread when no thread can be started.
+        private static bool _inline;
+
+        private static int FinishedCount { get { lock (Finished) return Finished.Count; } }
+
+        private static void Submit(MeasurementJob job)
+        {
+            if (_inline)
+            {
+                Run(job);
+                Publish(job);
+                return;
+            }
+            Interlocked.Increment(ref _inFlight);
+            lock (Jobs)
+            {
+                Jobs.Enqueue(job);
+                if (_worker == null) StartWorker();
+                Monitor.Pulse(Jobs);
+            }
+            if (_worker == null) RunInline();
+        }
+
+        private static void StartWorker()
+        {
+            try
+            {
+                var worker = new Thread(WorkerLoop)
+                {
+                    IsBackground = true, Name = "GAL level measurement", Priority = System.Threading.ThreadPriority.BelowNormal
+                };
+                worker.Start();
+                _worker = worker;
+            }
+            catch (Exception exception)
+            {
+                _inline = true;
+                Plugin.Log?.LogWarning($"level measurement thread unavailable, measuring inline: {exception.Message}");
+            }
+        }
+
+        private static void RunInline()
+        {
+            for (;;)
+            {
+                MeasurementJob job;
+                lock (Jobs)
+                {
+                    if (Jobs.Count == 0) return;
+                    job = Jobs.Dequeue();
+                }
+                Run(job);
+                Interlocked.Decrement(ref _inFlight);
+                Publish(job);
+            }
+        }
+
+        private static void WorkerLoop()
+        {
+            for (;;)
+            {
+                MeasurementJob job;
+                lock (Jobs)
+                {
+                    while (Jobs.Count == 0) Monitor.Wait(Jobs);
+                    job = Jobs.Dequeue();
+                }
+                Run(job);
+                lock (Finished) Finished.Enqueue(job);
+                Interlocked.Decrement(ref _inFlight);
+            }
+        }
+
+        private static void Run(MeasurementJob job)
+        {
+            try
+            {
+                float playbackDecayStart = job.NativeBodySeconds > 0f
+                    ? Math.Max(LowEndLevelModel.WindowSeconds, job.NativeBodySeconds / Math.Max(0.1f, job.Pitch))
+                    : LowEndLevelModel.WindowSeconds;
+                float measurementDecayStart = Math.Max(
+                    LowEndLevelModel.RepresentativeDecayStartSeconds, playbackDecayStart);
+                LowEndDynamicsLevels dynamics = LowEndLevelModel.MeasureDynamics(
+                    job.Pcm, job.Rate, job.Pitch, job.High, job.Low, measurementDecayStart);
+                job.Level = dynamics.Body * job.Volume;
+                job.BassLevel = LowEndLevelModel.MeasureBands(job.Pcm, job.Rate, job.Pitch, job.High, job.Low).Bass * job.Volume;
+                job.DecayLevel = dynamics.Decay * job.Volume;
+                job.DecayReady = dynamics.DecayReady;
+                job.Sum = ShotSumMeter.Measure(job.Pcm, job.Rate, job.Pitch, job.High, job.Low);
+            }
+            catch (Exception exception)
+            {
+                job.Failure = exception.Message;
+            }
+        }
+
+        private static void Publish()
+        {
+            for (;;)
+            {
+                MeasurementJob job;
+                lock (Finished)
+                {
+                    if (Finished.Count == 0) return;
+                    job = Finished.Dequeue();
+                }
+                Publish(job);
+            }
+        }
+
+        private static void Publish(MeasurementJob job)
+        {
+            Source source = job.Source;
+            source.Queued = false;
+            if (!Sources.TryGetValue(source.Id, out Source current) ||
+                !ReferenceEquals(current, source) ||
+                source.Revision == _revision)
+                return;
+            if (job.Failure != null)
+            {
+                Plugin.Log?.LogWarning($"level measurement skipped: {job.Failure}");
+                return;
+            }
+            // The band changed while this ran: these levels are for the old one.
+            if (job.Pitch != _pitch || job.High != _high || job.Low != _low)
+            {
+                Queue(source);
+                return;
+            }
+            source.Level = job.Level;
+            source.BassLevel = job.BassLevel;
+            source.DecayLevel = job.DecayLevel;
+            source.DecayReady = job.DecayReady;
+            source.Sum = job.Sum;
+            source.Revision = _revision;
+            source.HasBand = true;
+            source.BandPitch = job.Pitch;
+            source.BandHigh = job.High;
+            source.BandLow = job.Low;
+            MeasurementCount++;
+            if (source.CacheKey != null) LevelCache.PutLayer(source.CacheKey, CacheEntry(source));
         }
 
         private static void SetBand(float semitones, float high, float low)
@@ -307,7 +698,16 @@ namespace GunsAreLoud.Client.Audio
             if (_pitch == pitch && _high == high && _low == low) return;
             _pitch = pitch; _high = high; _low = low;
             _revision++;
-            foreach (Source source in Sources.Values) Queue(source);
+            foreach (Source source in Sources.Values)
+            {
+                // Levels taken from the persistent cache have no samples to
+                // re-measure; they stay valid exactly in the band they were
+                // measured in.
+                if (source.Pcm == null && source.HasBand && source.BandPitch == pitch &&
+                    source.BandHigh == high && source.BandLow == low)
+                    source.Revision = _revision;
+                else Queue(source);
+            }
         }
 
         private static void Queue(Source source)
@@ -321,22 +721,78 @@ namespace GunsAreLoud.Client.Audio
             Pending.Enqueue(source);
         }
 
-        private static void Measure(Source source)
+        private static LevelCacheEntry CacheEntry(Source source)
         {
-            if (source.Pcm == null) return;
-            float playbackDecayStart = source.NativeBodySeconds > 0f
-                ? Math.Max(LowEndLevelModel.WindowSeconds, source.NativeBodySeconds / Math.Max(0.1f, _pitch))
-                : LowEndLevelModel.WindowSeconds;
-            float measurementDecayStart = Math.Max(
-                LowEndLevelModel.RepresentativeDecayStartSeconds, playbackDecayStart);
-            LowEndDynamicsLevels dynamics = LowEndLevelModel.MeasureDynamics(
-                source.Pcm, source.Rate, _pitch, _high, _low, measurementDecayStart);
-            source.Level = dynamics.Body * source.Volume;
-            source.BassLevel = LowEndLevelModel.MeasureBands(source.Pcm, source.Rate, _pitch, _high, _low).Bass * source.Volume;
-            source.DecayLevel = dynamics.Decay * source.Volume;
-            source.DecayReady = dynamics.DecayReady;
-            source.Revision = _revision;
-            MeasurementCount++;
+            float volume = source.Volume > 0f ? source.Volume : 1f;
+            return new LevelCacheEntry
+            {
+                HasLayer = true,
+                BaseVolume = source.Volume,
+                Level = source.Level / volume,
+                BassLevel = source.BassLevel / volume,
+                DecayLevel = source.DecayLevel / volume,
+                DecayReady = source.DecayReady,
+                NativeBodySeconds = source.NativeBodySeconds,
+                Group = source.Group,
+                BodySource = source.BodySource,
+                Rate = source.Rate,
+                BandPitch = source.BandPitch,
+                BandHigh = source.BandHigh,
+                BandLow = source.BandLow,
+                CopyPeak = source.Sum.CopyPeak,
+                CopyAttackDb = source.Sum.Valid ? source.Sum.CopyAttackDb : float.NaN,
+                SumPeaks = source.Sum.Valid ? (float[])source.Sum.SumPeaks.Clone() : null,
+                LimitLoss = source.Sum.Valid && source.Sum.HasLoss ? (float[])source.Sum.LimitLoss.Clone() : null
+            };
+        }
+
+        /// <summary>
+        /// The analysis band a tuning measures in, exactly as the cache keeps it.
+        /// </summary>
+        internal static void BandOf(float semitones, float highpassHz, float lowpassHz,
+            out float pitch, out float high, out float low)
+        {
+            pitch = PitchedGunshotLayer.CalculatePitchRatio(semitones);
+            low = lowpassHz;
+            high = Math.Max(10f, Math.Min(low - 10f, highpassHz));
+        }
+
+        /// <summary>
+        /// Registers levels measured in an earlier session, without samples.
+        /// Ready at once in the band they were measured in; they cannot be
+        /// re-measured for another band. <paramref name="volume"/> is the bank
+        /// volume now, which the clip's own levels are scaled by.
+        /// </summary>
+        internal static void RegisterMeasured(int id, LevelCacheEntry entry, float volume, string cacheKey = null)
+        {
+            if (entry == null || !entry.HasLayer) return;
+            var source = new Source
+            {
+                Id = id, Rate = entry.Rate, Volume = volume, Group = entry.Group,
+                NativeBodySeconds = Math.Max(0f, entry.NativeBodySeconds),
+                BodySource = entry.BodySource ?? "default",
+                Level = entry.Level * volume,
+                BassLevel = entry.BassLevel * volume,
+                DecayLevel = entry.DecayLevel * volume,
+                DecayReady = entry.DecayReady,
+                HasBand = true,
+                BandPitch = entry.BandPitch, BandHigh = entry.BandHigh, BandLow = entry.BandLow,
+                CacheKey = cacheKey,
+                Sum = entry.HasSum
+                    ? new ShotSumMeasure(entry.CopyPeak, entry.CopyAttackDb, (float[])entry.SumPeaks.Clone(),
+                        entry.HasLoss ? (float[])entry.LimitLoss.Clone() : null)
+                    : default
+            };
+            source.Revision = source.BandPitch == _pitch && source.BandHigh == _high && source.BandLow == _low
+                ? _revision : -1;
+            if (Sources.TryGetValue(id, out Source replaced)) ReleasePcm(replaced);
+            Sources[id] = source;
+            if (source.Revision == _revision) MeasurementCount++;
+        }
+
+        internal static void RegisterMeasured(AudioClip clip, LevelCacheEntry entry, float volume, string cacheKey = null)
+        {
+            if (clip != null) RegisterMeasured(clip.GetInstanceID(), entry, volume, cacheKey);
         }
 
         internal static float Gain(AudioClip clip, LocalGunshotAudioTuning tuning, out bool ready)
@@ -353,6 +809,29 @@ namespace GunsAreLoud.Client.Audio
             return result.Gain;
         }
 
+        /// <summary>
+        /// The copy's peak and attack level and the aligned sum's peaks for this
+        /// recording, measured in the band of <paramref name="tuning"/>; a
+        /// variant not measured yet takes the mean of its measured siblings.
+        /// False when nothing is measured.
+        /// </summary>
+        internal static bool TryGetCopyBudget(int id, LocalGunshotAudioTuning tuning, out ShotSumMeasure sum)
+        {
+            sum = default;
+            if (_pitch != PitchedGunshotLayer.CalculatePitchRatio(tuning.PitchedLayerSemitones) ||
+                _high != Math.Max(10f, Math.Min(tuning.PitchedLayerLowpassHz - 10f, tuning.PitchedLayerHighpassHz)) ||
+                _low != tuning.PitchedLayerLowpassHz) return false;
+            if (Aliases.TryGetValue(id, out int body)) id = body;
+            if (!Sources.TryGetValue(id, out Source source) || source.Revision != _revision)
+            {
+                source = SiblingEstimate(id);
+                if (source == null) return false;
+            }
+            if (!source.Sum.Valid) return false;
+            sum = source.Sum;
+            return true;
+        }
+
         internal static LowEndNormalizationResult Evaluate(AudioClip clip, LocalGunshotAudioTuning tuning) =>
             clip != null ? Evaluate(clip.GetInstanceID(), tuning) : new LowEndNormalizationResult(1f, false);
 
@@ -367,7 +846,10 @@ namespace GunsAreLoud.Client.Audio
             bool decayOnly = Aliases.TryGetValue(id, out int body);
             if (decayOnly) id = body;
             if (!Sources.TryGetValue(id, out Source source) || source.Revision != _revision)
-                return new LowEndNormalizationResult(1f, false);
+            {
+                source = SiblingEstimate(id);
+                if (source == null) return new LowEndNormalizationResult(1f, false);
+            }
             float target = LowEndLevelModel.TargetRms(source.Group);
             // Single pistol variants can have similar full-band peaks but very different bass.
             // Match measured bass with a scalar only: no new phase-altering playback crossover.
@@ -398,6 +880,7 @@ namespace GunsAreLoud.Client.Audio
         internal static void Clear()
         {
             Sources.Clear(); Aliases.Clear(); Pending.Clear(); Retained.Clear();
+            SiblingSets.Clear(); SiblingEstimates.Clear();
             _retainedSamples = 0;
             _revision++;
             MeasurementCount = 0;

@@ -104,7 +104,7 @@ namespace GunsAreLoud.Tests
             PropertyInfo map = typeof(HeadphoneMixerAsset).GetProperty("StockGroupMap",
                 BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
             Assert.That(map, Is.Not.Null);
-            MethodInfo load = typeof(HeadphoneMixerAsset).GetMethod("GetOrLoad",
+            MethodInfo load = typeof(HeadphoneMixerAsset).GetMethod("LoadVariant",
                 BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
             MethodInfo setter = map.GetSetMethod(true);
             int writes = CallsOf(load).Count(callee => callee == setter);

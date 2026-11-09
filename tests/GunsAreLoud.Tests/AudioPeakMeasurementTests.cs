@@ -78,6 +78,11 @@ namespace GunsAreLoud.Tests
             Assert.That(telemetry.ChannelsMeasured, Is.EqualTo(1));
             Assert.That(telemetry.PreClampOverCount, Is.EqualTo(1920));
             Assert.That(telemetry.ChannelScope, Is.EqualTo(ListenerProbeChannelScope.FrontPair));
+            // What left the limiter: bounded, over the same window, in the same weighting.
+            Assert.That(telemetry.PostSamplePeak, Is.LessThanOrEqualTo(1f));
+            Assert.That(telemetry.PostSamplePeak, Is.GreaterThan(0.9f));
+            Assert.That(float.IsNaN(telemetry.PostKWeightedDb), Is.False);
+            Assert.That(telemetry.PostKWeightedDb, Is.LessThan(telemetry.KWeightedDb));
         }
 
         [Test]

@@ -1,4 +1,5 @@
 ﻿using System.Runtime.CompilerServices;
+using GunsAreLoud.Client.Audio;
 using GunsAreLoud.Client.Configuration;
 
 namespace GunsAreLoud.Client.Runtime
@@ -30,6 +31,19 @@ namespace GunsAreLoud.Client.Runtime
         internal readonly float ReverbSendDb;
         internal readonly float ReverbReach;
         internal readonly IndoorHeadphonesDamping HeadphonesDamping;
+        /// <summary>Level the direct sound of this shot should play at, in dB on the measure's scale.</summary>
+        internal readonly float DirectTargetDb;
+        /// <summary>q: how much of the way to the target the direct sound is moved (0-1).</summary>
+        internal readonly float DirectStrength;
+        /// <summary>How much of the shot's peak budget the recording leaves to the copy, dB.</summary>
+        internal readonly float DirectCopyHeadroomDb;
+        /// <summary>Shot density: how far over the peak budget the event may go into the program limiter, dB; 0 keeps the limiter a safety.</summary>
+        internal readonly float DirectDensityDb;
+        /// <summary>L_E of the round, dB against the reference cartridge: the copy's cartridge weight.</summary>
+        internal readonly float EnergyIndex;
+
+        /// <summary>The configured level of an intermediate rifle cartridge above 9x19 in the copy, dB.</summary>
+        internal float CartridgeContrastDb => CaliberContrastPercent * ModConfig.CartridgeContrastSpanDb / 100f;
 
         internal LocalGunshotAudioTuning(
             float directBoostDb,
@@ -55,8 +69,18 @@ namespace GunsAreLoud.Client.Runtime
             float caliberContrastPercent = 100f,
             IndoorHeadphonesDamping headphonesDamping = default, bool normalizeBass = false,
             float automaticReportOverlapShots = 6f,
-            float automaticLateToleranceScale = 1f)
+            float automaticLateToleranceScale = 1f,
+            float directTargetDb = 0f,
+            float directStrength = 0f,
+            float directCopyHeadroomDb = DirectLevelModel.DefaultCopyHeadroomDb,
+            float energyIndex = 0f,
+            float directDensityDb = 0f)
         {
+            EnergyIndex = energyIndex;
+            DirectDensityDb = directDensityDb;
+            DirectTargetDb = directTargetDb;
+            DirectStrength = directStrength;
+            DirectCopyHeadroomDb = directCopyHeadroomDb;
             NormalizeBass = normalizeBass;
             DirectBoostDb = directBoostDb;
             DirectBodyGain = directBodyGain;
@@ -83,6 +107,40 @@ namespace GunsAreLoud.Client.Runtime
             ReverbReach = reverbReach;
             HeadphonesDamping = headphonesDamping;
         }
+
+        /// <summary>The same tuning with another loop beat (0 = a one-shot).</summary>
+        internal LocalGunshotAudioTuning WithLoopBeat(float loopBeatSeconds) =>
+            new LocalGunshotAudioTuning(
+                DirectBoostDb,
+                DirectBodyGain,
+                PressureFrequencyHz,
+                AutomaticPitchedRoute,
+                PitchedLayerSemitones,
+                PitchedLayerHighpassHz,
+                PitchedLayerLowpassHz,
+                PitchedLayerFadePercent,
+                AutomaticPitchedTailSeconds,
+                PitchedLayerGainDb,
+                PitchedLayerOcclusion,
+                PitchedLayerOccludedLowpassHz,
+                loopBeatSeconds,
+                ApplyIndoorRoom,
+                IndoorRoomMix,
+                EarlyReflectionsSendDb,
+                ReverbSendDb,
+                ReverbReach,
+                AutomaticTailMode,
+                LowEndNormalizationPercent,
+                CaliberContrastPercent,
+                HeadphonesDamping,
+                NormalizeBass,
+                AutomaticReportOverlapShots,
+                AutomaticLateToleranceScale,
+                DirectTargetDb,
+                DirectStrength,
+                DirectCopyHeadroomDb,
+                EnergyIndex,
+                DirectDensityDb);
     }
 
     internal sealed class LocalGunshotAudioTuningBox
@@ -90,16 +148,31 @@ namespace GunsAreLoud.Client.Runtime
         internal readonly LocalGunshotAudioTuning Value;
         internal readonly AutomaticShotContext Context;
         internal readonly DiagnosticShotToken DiagnosticShot;
+        internal readonly float BurstIntervalSeconds;
+        internal readonly DirectLevelDecision Direct;
 
         internal LocalGunshotAudioTuningBox(
             LocalGunshotAudioTuning value,
             AutomaticShotContext context = null,
-            DiagnosticShotToken diagnosticShot = default)
+            DiagnosticShotToken diagnosticShot = default,
+            float burstIntervalSeconds = 0f,
+            DirectLevelDecision direct = default)
         {
+            Direct = direct;
             Value = value;
             Context = context;
             DiagnosticShot = diagnosticShot;
+            BurstIntervalSeconds = burstIntervalSeconds;
         }
+
+        /// <summary>
+        /// The fire interval a queued sample's copy is released by: a whole-shot
+        /// sample of continuous fire (an engine that queues every round as its
+        /// own shot) has later rounds that shorten it. A looped body, or a shot
+        /// that is not continuous fire, keeps its copy whole.
+        /// </summary>
+        internal static float BurstIntervalForSample(bool wholeShotSample, float continuousFireIntervalSeconds) =>
+            wholeShotSample && continuousFireIntervalSeconds > 0.001f ? continuousFireIntervalSeconds : 0f;
     }
 
     // Shared with the queued release tail, not global to the current weapon:
@@ -126,6 +199,9 @@ namespace GunsAreLoud.Client.Runtime
         internal SuperSource BodySource;
         internal AutomaticPitchedRoute LastPitchedRoute;
         internal bool RouteInitialized;
+        // The direct level correction of this burst's body sample: its release
+        // tail plays with exactly this correction.
+        internal DirectLevelDecision BodyDirect;
     }
 
     internal static class LocalGunshotSampleRegistry
@@ -135,7 +211,9 @@ namespace GunsAreLoud.Client.Runtime
 
         internal static void Register(SuperAudioSample sample, LocalGunshotAudioTuning tuning,
             AutomaticShotContext context = null,
-            DiagnosticShotToken diagnosticShot = default)
+            DiagnosticShotToken diagnosticShot = default,
+            float continuousFireIntervalSeconds = 0f,
+            DirectLevelDecision direct = default)
         {
             if (sample == null)
             {
@@ -143,7 +221,8 @@ namespace GunsAreLoud.Client.Runtime
             }
 
             Samples.Remove(sample);
-            Samples.Add(sample, new LocalGunshotAudioTuningBox(tuning, context, diagnosticShot));
+            Samples.Add(sample, new LocalGunshotAudioTuningBox(tuning, context, diagnosticShot,
+                continuousFireIntervalSeconds, direct));
         }
 
         /// <summary>
@@ -158,11 +237,26 @@ namespace GunsAreLoud.Client.Runtime
 
         internal static bool TryTake(SuperAudioSample sample, out LocalGunshotAudioTuning tuning,
             out AutomaticShotContext context,
-            out DiagnosticShotToken diagnosticShot)
+            out DiagnosticShotToken diagnosticShot) =>
+            TryTake(sample, out tuning, out context, out diagnosticShot, out _);
+
+        internal static bool TryTake(SuperAudioSample sample, out LocalGunshotAudioTuning tuning,
+            out AutomaticShotContext context,
+            out DiagnosticShotToken diagnosticShot,
+            out float continuousFireIntervalSeconds) =>
+            TryTake(sample, out tuning, out context, out diagnosticShot, out continuousFireIntervalSeconds, out _);
+
+        internal static bool TryTake(SuperAudioSample sample, out LocalGunshotAudioTuning tuning,
+            out AutomaticShotContext context,
+            out DiagnosticShotToken diagnosticShot,
+            out float continuousFireIntervalSeconds,
+            out DirectLevelDecision direct)
         {
+            direct = default;
             tuning = default;
             context = null;
             diagnosticShot = default;
+            continuousFireIntervalSeconds = 0f;
             if (sample == null || !Samples.TryGetValue(sample, out LocalGunshotAudioTuningBox boxed))
             {
                 return false;
@@ -172,6 +266,8 @@ namespace GunsAreLoud.Client.Runtime
             tuning = boxed.Value;
             context = boxed.Context;
             diagnosticShot = boxed.DiagnosticShot;
+            continuousFireIntervalSeconds = boxed.BurstIntervalSeconds;
+            direct = boxed.Direct;
             return true;
         }
 

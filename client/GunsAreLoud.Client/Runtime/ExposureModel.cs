@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using GunsAreLoud.Client.Configuration;
 using UnityEngine;
 
@@ -6,10 +6,22 @@ namespace GunsAreLoud.Client.Runtime
 {
     internal sealed class ExposureResult
     {
-        internal float CaliberBaseline;
-        internal float EnergyCorrection;
-        internal float ModMultiplier;
-        internal float SuppressorMultiplier;
+        /// <summary>L = L_E + L_d + L_m, dB.</summary>
+        internal float LevelIndex;
+        /// <summary>L_E, dB against the reference cartridge.</summary>
+        internal float EnergyIndex;
+        /// <summary>L_d, dB against the reference distance.</summary>
+        internal float DistanceIndex;
+        /// <summary>L_m, dB: the muzzle devices on the scale.</summary>
+        internal float DeviceIndex;
+        internal float EnergyJoules;
+        internal float PayloadMassGram;
+        internal float MuzzleDistance;
+        /// <summary>True when the round had no mass or velocity and L_E is the reference.</summary>
+        internal bool IndexFallback;
+        /// <summary>Severity from the level index alone, before any multiplier.</summary>
+        internal float BaseSeverity;
+        internal float HeadphonesCaliberPenaltyDb;
         internal float RoomMultiplier;
         internal float HeadphonesMultiplier;
         internal float HeadphonesProtectionDb;
@@ -21,36 +33,29 @@ namespace GunsAreLoud.Client.Runtime
 
     internal static class ExposureModel
     {
-        private const float ReferenceEnergyJoules = 1800f;
-
         internal static ExposureResult Calculate(ShotDescriptor shot, TuningSnapshot tuning)
         {
-            float caliberBaseline = GetCaliberBaseline(shot.AmmoCaliber, tuning);
-            float energyCorrection = GetEnergyCorrection(shot, tuning);
-
-            float modCorrection = Mathf.Clamp(
-                shot.SummedModLoudness / 100f * tuning.ModLoudnessInfluence,
-                -0.6f,
-                0.6f);
-            float modMultiplier = Mathf.Max(0.1f, 1f + modCorrection);
-            float suppressorMultiplier = shot.IsSuppressed ? tuning.SuppressedMultiplier : 1f;
+            // The muzzle devices are in the level, so a suppressor takes the
+            // severity down the same line as a lighter round or a longer barrel.
+            ShotLevel level = ShotLevelIndex.Compute(shot, tuning.MuzzleDeviceIndexPerLoudness);
+            float baseSeverity = BaseSeverity(level.LevelIndex);
             float roomMultiplier = shot.IsIndoor ? tuning.IndoorDoseMultiplier : 1f;
 
             float headphonesProtectionDb = 0f;
+            float caliberPenaltyDb = 0f;
             float directHeadphonesMultiplier = 1f;
             float roomHeadphonesMultiplier = 1f;
             if (shot.HasActiveHeadphones)
             {
-                headphonesProtectionDb = GetHeadphonesProtectionDb(shot, tuning);
+                caliberPenaltyDb = HeadsetCaliberPenaltyDb(level.EnergyIndex, tuning.HeadsetCaliberPenaltyDb);
+                headphonesProtectionDb = GetHeadphonesProtectionDb(shot, caliberPenaltyDb, tuning);
                 directHeadphonesMultiplier = DbToPressureMultiplier(headphonesProtectionDb);
                 roomHeadphonesMultiplier = DbToPressureMultiplier(Mathf.Max(
                     tuning.MinimumHeadphonesProtectionDb,
                     headphonesProtectionDb - tuning.IndoorHeadphonesPenaltyDb));
             }
 
-            float severity = Mathf.Max(0f, caliberBaseline + energyCorrection);
-            severity *= modMultiplier;
-            severity *= suppressorMultiplier;
+            float severity = baseSeverity;
             float roomContribution = Mathf.Max(0f, roomMultiplier - 1f);
             float protectedRoomMultiplier =
                 directHeadphonesMultiplier + roomContribution * roomHeadphonesMultiplier;
@@ -68,10 +73,16 @@ namespace GunsAreLoud.Client.Runtime
 
             return new ExposureResult
             {
-                CaliberBaseline = caliberBaseline,
-                EnergyCorrection = energyCorrection,
-                ModMultiplier = modMultiplier,
-                SuppressorMultiplier = suppressorMultiplier,
+                LevelIndex = level.LevelIndex,
+                EnergyIndex = level.EnergyIndex,
+                DistanceIndex = level.DistanceIndex,
+                DeviceIndex = level.DeviceIndex,
+                EnergyJoules = level.EnergyJoules,
+                PayloadMassGram = level.PayloadMassGram,
+                MuzzleDistance = level.MuzzleDistance,
+                IndexFallback = level.Fallback,
+                BaseSeverity = baseSeverity,
+                HeadphonesCaliberPenaltyDb = caliberPenaltyDb,
                 RoomMultiplier = roomMultiplier,
                 HeadphonesMultiplier = headphonesMultiplier,
                 HeadphonesProtectionDb = headphonesProtectionDb,
@@ -82,6 +93,31 @@ namespace GunsAreLoud.Client.Runtime
             };
         }
 
+        /// <summary>
+        /// Severity of a shot from its level index, before mods, suppressor,
+        /// room, headset and preset: a line through the long-gun anchors, never
+        /// below zero.
+        /// </summary>
+        internal static float BaseSeverity(float levelIndex) =>
+            Mathf.Max(0f, ShotLevelIndex.SeverityAtZeroIndex + ShotLevelIndex.SeverityPerDb * levelIndex);
+
+        /// <summary>
+        /// How many dB of headset protection a cartridge takes away: the more
+        /// energy, the more low end gets through the ear cups. It depends on
+        /// the energy term only (the size of the charge sets the spectrum, the
+        /// distance only the level), reaches <paramref name="penaltyAtHeavyDb"/>
+        /// at the median .50 BMG round and is zero for intermediate rounds and
+        /// below.
+        /// </summary>
+        internal static float HeadsetCaliberPenaltyDb(float energyIndex, float penaltyAtHeavyDb)
+        {
+            float penalty = Mathf.Max(0f, penaltyAtHeavyDb);
+            return Mathf.Clamp(
+                penalty * (energyIndex - ShotLevelIndex.PenaltyZeroEnergyIndex) / ShotLevelIndex.PenaltySpanDb,
+                0f,
+                penalty + ShotLevelIndex.PenaltyHeadroomDb);
+        }
+
         internal static float GetHeadphonesProtectionDb(ShotDescriptor shot, TuningSnapshot tuning)
         {
             if (shot == null || !shot.HasActiveHeadphones)
@@ -89,11 +125,21 @@ namespace GunsAreLoud.Client.Runtime
                 return 0f;
             }
 
+            return GetHeadphonesProtectionDb(
+                shot,
+                HeadsetCaliberPenaltyDb(ShotLevelIndex.Compute(shot).EnergyIndex, tuning.HeadsetCaliberPenaltyDb),
+                tuning);
+        }
+
+        private static float GetHeadphonesProtectionDb(
+            ShotDescriptor shot,
+            float caliberPenaltyDb,
+            TuningSnapshot tuning)
+        {
             float templateProtectionDb = shot.HeadphonesCompressorThresholdDb < -0.01f
                 ? -shot.HeadphonesCompressorThresholdDb
                 : tuning.DefaultHeadphonesProtectionDb;
 
-            float caliberPenaltyDb = GetHeadphonesCaliberPenaltyDb(shot.AmmoCaliber, tuning);
             return Mathf.Clamp(
                 templateProtectionDb + tuning.HeadphonesFitOffsetDb - caliberPenaltyDb,
                 tuning.MinimumHeadphonesProtectionDb,
@@ -103,104 +149,6 @@ namespace GunsAreLoud.Client.Runtime
         internal static float DbToPressureMultiplier(float attenuationDb)
         {
             return (float)Math.Pow(10.0, -Mathf.Max(0f, attenuationDb) / 20.0);
-        }
-
-        internal static float GetCaliberBaseline(string caliber, TuningSnapshot tuning)
-        {
-            switch ((caliber ?? string.Empty).ToLowerInvariant())
-            {
-                case "20x1mm":
-                    return tuning.RimfireSeverity;
-
-                case "9x18pm":
-                case "9x19para":
-                case "9x21":
-                case "9x33r":
-                case "762x25tt":
-                case "1143x23acp":
-                case "46x30":
-                case "57x28":
-                case "127x33":
-                    return tuning.PistolSeverity;
-
-                case "545x39":
-                case "556x45nato":
-                case "762x35":
-                case "762x39":
-                case "9x39":
-                case "366tkm":
-                case "127x55":
-                    return tuning.IntermediateSeverity;
-
-                case "762x51":
-                case "762x54r":
-                case "68x51":
-                case "86x70":
-                    return tuning.FullPowerSeverity;
-
-                case "12g":
-                case "20g":
-                case "23x75":
-                    return tuning.ShotgunSeverity;
-
-                case "127x99":
-                case "127x108":
-                case "26x75":
-                case "30x29":
-                case "40mmru":
-                case "40x46":
-                case "725":
-                    return tuning.HeavySeverity;
-
-                default:
-                    return tuning.UnknownCaliberSeverity;
-            }
-        }
-
-        private static float GetEnergyCorrection(ShotDescriptor shot, TuningSnapshot tuning)
-        {
-            if (shot.BulletMassGram <= 0f || shot.MuzzleVelocity <= 0f || tuning.EnergyInfluence <= 0f)
-            {
-                return 0f;
-            }
-
-            double massKg = shot.BulletMassGram / 1000.0;
-            double energyJoules = 0.5 * massKg * shot.MuzzleVelocity * shot.MuzzleVelocity;
-            double logarithmicRatio = Math.Log10(Math.Max(1.0, energyJoules) / ReferenceEnergyJoules);
-            float correction = (float)logarithmicRatio * tuning.EnergyInfluence;
-            return Mathf.Clamp(
-                correction,
-                -tuning.MaximumEnergyCorrection,
-                tuning.MaximumEnergyCorrection);
-        }
-
-        private static float GetHeadphonesCaliberPenaltyDb(string caliber, TuningSnapshot tuning)
-        {
-            switch ((caliber ?? string.Empty).ToLowerInvariant())
-            {
-                case "762x51":
-                case "762x54r":
-                case "68x51":
-                case "86x70":
-                    return tuning.FullPowerHeadphonesPenaltyDb;
-
-                case "12g":
-                case "20g":
-                case "23x75":
-                    return tuning.ShotgunHeadphonesPenaltyDb;
-
-                case "127x99":
-                case "127x108":
-                case "26x75":
-                case "30x29":
-                case "40mmru":
-                case "40x46":
-                case "725":
-                    return tuning.HeavyHeadphonesPenaltyDb;
-
-                default:
-                    return 0f;
-            }
         }
 
         private static float GetAsymmetry(WeaponCategory category, TuningSnapshot tuning)

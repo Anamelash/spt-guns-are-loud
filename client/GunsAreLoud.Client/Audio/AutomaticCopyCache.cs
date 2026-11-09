@@ -54,7 +54,8 @@ namespace GunsAreLoud.Client.Audio
 
     /// <summary>
     /// Main-thread cache of short PCM clips captured from one authored beat of an
-    /// automatic weapon loop. No AudioClip.GetData call is made against EFT clips.
+    /// automatic weapon loop. Its PCM is captured from playback; this cache never
+    /// reads an EFT clip with AudioClip.GetData.
     /// </summary>
     internal static class AutomaticCopyCache
     {

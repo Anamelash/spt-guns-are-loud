@@ -144,6 +144,129 @@ namespace GunsAreLoud.Tests
             Assert.That(limiter.Gain, Is.EqualTo(1f));
         }
 
+        // ----- program mode (shot density) -----
+
+        private static MasterLimiterState Program()
+        {
+            var limiter = new MasterLimiterState();
+            limiter.SetProgram(true);
+            return limiter;
+        }
+
+        [Test]
+        public void ProgramModeDelaysByOneLookaheadAndPassesQuietAudioUntouched()
+        {
+            MasterLimiterState limiter = Program();
+            var buffer = new float[2 * 2048];
+            for (int index = 0; index < buffer.Length; index++)
+                buffer[index] = 0.4f * (float)Math.Sin(index * 0.013) + 0.05f * (index % 7);
+            var original = (float[])buffer.Clone();
+
+            int engaged = limiter.Process(buffer, 2, Rate, out _, out float deepestGain);
+
+            int delay = limiter.DelayFrames;
+            Assert.That(delay, Is.EqualTo((int)(Rate * MasterLimiterState.ProgramLookaheadSeconds)));
+            Assert.That(delay, Is.GreaterThan(0));
+            Assert.That(engaged, Is.Zero);
+            Assert.That(deepestGain, Is.EqualTo(1f));
+            for (int frame = 0; frame < delay; frame++)
+            {
+                Assert.That(buffer[frame * 2], Is.Zero, "one lookahead of silence while the first frames wait");
+                Assert.That(buffer[frame * 2 + 1], Is.Zero);
+            }
+            for (int frame = delay; frame < 2048; frame++)
+            {
+                Assert.That(buffer[frame * 2], Is.EqualTo(original[(frame - delay) * 2]), $"frame {frame}");
+                Assert.That(buffer[frame * 2 + 1], Is.EqualTo(original[(frame - delay) * 2 + 1]));
+            }
+        }
+
+        [Test]
+        public void ProgramModeNeverLetsASampleAboveTheCeilingWhateverArrives()
+        {
+            MasterLimiterState limiter = Program();
+            var random = new Random(20261108);
+            for (int block = 0; block < 60; block++)
+            {
+                var buffer = new float[2 * 512];
+                float scale = 0.2f + block * 0.3f;
+                for (int index = 0; index < buffer.Length; index++)
+                    buffer[index] = (float)(random.NextDouble() * 2.0 - 1.0) * scale;
+
+                limiter.Process(buffer, 2, Rate, out _, out _);
+
+                Assert.That(Peak(buffer), Is.LessThanOrEqualTo(1f), $"block {block} at scale {scale}");
+            }
+        }
+
+        [Test]
+        public void ProgramModeReachesTheCrackAlongARampThatStartsOneLookaheadBeforeIt()
+        {
+            MasterLimiterState limiter = Program();
+            int delay = (int)(Rate * MasterLimiterState.ProgramLookaheadSeconds);
+            const int Crack = 1000;
+            var buffer = new float[2 * 2048];
+            for (int index = 0; index < buffer.Length; index++) buffer[index] = 0.5f;
+            buffer[Crack * 2] = 1.6f;
+            buffer[Crack * 2 + 1] = 1.6f;
+
+            limiter.Process(buffer, 2, Rate, out _, out float deepestGain);
+
+            // The crack leaves one lookahead late, bounded.
+            Assert.That(buffer[(Crack + delay) * 2], Is.LessThanOrEqualTo(1f));
+            Assert.That(buffer[(Crack + delay) * 2], Is.EqualTo(1.6f * deepestGain).Within(1e-5f));
+            // Well before it, nothing has moved; just before it, the ramp has begun.
+            Assert.That(buffer[(Crack + delay - delay - 4) * 2], Is.EqualTo(0.5f));
+            float halfway = buffer[(Crack + delay - delay / 2) * 2];
+            Assert.That(halfway, Is.LessThan(0.5f));
+            Assert.That(halfway, Is.GreaterThan(0.5f * deepestGain));
+            float justBefore = buffer[(Crack + delay - 1) * 2];
+            Assert.That(justBefore, Is.LessThan(halfway), "the ramp descends towards the crack");
+        }
+
+        [Test]
+        public void ProgramModeGivesTheGainBackWithinACrackNotAWholeReport()
+        {
+            MasterLimiterState limiter = Program();
+            limiter.Process(Report(peak: 2.0f), 2, Rate, out _, out _);
+            Assert.That(limiter.Gain, Is.LessThan(1f));
+
+            // 50 ms of quiet: five program release constants.
+            var quiet = new float[2 * (Rate / 20)];
+            for (int index = 0; index < quiet.Length; index++) quiet[index] = 0.1f;
+            limiter.Process(quiet, 2, Rate, out _, out _);
+
+            Assert.That(limiter.Gain, Is.GreaterThan(0.99f),
+                "The body of the shot and the world under it are not held down after the crack.");
+        }
+
+        [Test]
+        public void SwitchingTheModeDropsTheCarriedGainAndTheWaitingAudio()
+        {
+            var limiter = new MasterLimiterState();
+            limiter.Process(Report(peak: 2.0f), 2, Rate, out _, out _);
+            Assert.That(limiter.Program, Is.False);
+            Assert.That(limiter.Gain, Is.LessThan(1f));
+
+            limiter.SetProgram(true);
+            Assert.That(limiter.Program, Is.True);
+            Assert.That(limiter.Gain, Is.EqualTo(1f));
+            Assert.That(limiter.DelayFrames, Is.Zero, "no rate seen yet in this mode");
+
+            var quiet = new float[2 * 512];
+            for (int index = 0; index < quiet.Length; index++) quiet[index] = 0.3f;
+            Assert.That(limiter.Process(quiet, 2, Rate, out _, out _), Is.Zero);
+            Assert.That(limiter.DelayFrames, Is.GreaterThan(0));
+
+            limiter.SetProgram(false);
+            Assert.That(limiter.DelayFrames, Is.Zero);
+            var again = new float[2 * 512];
+            for (int index = 0; index < again.Length; index++) again[index] = 0.3f;
+            var expected = (float[])again.Clone();
+            limiter.Process(again, 2, Rate, out _, out _);
+            Assert.That(again, Is.EqualTo(expected), "safety mode has no delay");
+        }
+
         [Test]
         public void AHearingStageThatIsFollowedByTheLimiterDoesNotCutFirst()
         {

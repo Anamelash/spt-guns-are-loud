@@ -117,6 +117,8 @@ namespace GunsAreLoud.Client.Runtime
             EquippedHeadphonesState headphones = HeadphonesResolver.Resolve(
                 HeadphonesResolver.FindEquipped(equipment), mixerHeadphones, equipment != null);
 
+            Vector3 muzzlePosition = fireport != null ? fireport.position : shotPosition;
+
             descriptor = new ShotDescriptor
             {
                 DspTime = AudioSettings.dspTime,
@@ -124,6 +126,8 @@ namespace GunsAreLoud.Client.Runtime
                 BulletMassGram = Mathf.Max(0f, ammo.BulletMassGram),
                 MuzzleVelocity = Mathf.Max(0f, weapon.TotalVelocity > 0f ? weapon.TotalVelocity : ammo.InitialSpeed),
                 ProjectileCount = Mathf.Max(1, ammo.ProjectileCount),
+                PayloadMassGram = AmmoDatabase.PayloadMassGram(ammo.AmmoTemplate),
+                MuzzleDistance = Vector3.Distance(muzzlePosition, ListenerPosition(player)),
                 WeaponClass = weaponClass,
                 WeaponCategory = facts.Category,
                 WeaponTemplateId = weapon.StringTemplateId ?? string.Empty,
@@ -131,16 +135,50 @@ namespace GunsAreLoud.Client.Runtime
                 SummedModLoudness = summedModLoudness,
                 IsIndoor = bridge.Environment == EnvironmentType.Indoor,
                 IsLeftStance = isLeftStance,
-                MuzzlePosition = fireport != null ? fireport.position : shotPosition,
+                MuzzlePosition = muzzlePosition,
                 MuzzleForward = fireport != null ? fireport.forward : shotDirection.normalized,
                 HasActiveHeadphones = headphones.Active,
                 HeadphonesName = headphones.Name,
                 MixerHeadphonesName = headphones.MixerName,
                 HeadphonesSource = headphones.Source,
-                HeadphonesCompressorThresholdDb = headphones.ThresholdDb
+                HeadphonesCompressorThresholdDb = headphones.ThresholdDb,
+                ContinuousFireIntervalSeconds = ContinuousFireInterval(
+                    soundPlayer.IsAutoWeapon,
+                    weapon.SelectedFireMode == Weapon.EFireMode.fullauto ||
+                    weapon.SelectedFireMode == Weapon.EFireMode.burst,
+                    weapon.FireRate)
             };
 
             return true;
+        }
+
+        /// <summary>
+        /// Where the shooter hears the shot from: the main camera, which carries
+        /// the audio listener in first person; the head bone when there is no
+        /// camera; otherwise eye height above the player's feet.
+        /// </summary>
+        private static Vector3 ListenerPosition(Player player)
+        {
+            Camera camera = Camera.main;
+            if (camera != null) return camera.transform.position;
+            PlayerBones bones = player.PlayerBones;
+            Transform head = bones != null && bones.Head != null ? bones.Head.Original : null;
+            if (head != null) return head.position;
+            return player.Position + Vector3.up * EyeHeightMeters;
+        }
+
+        private const float EyeHeightMeters = 1.6f;
+
+        /// <summary>
+        /// The interval Sound Engine Backport schedules continuous fire on: an
+        /// automatic weapon in full auto or burst, at its rate of fire, never
+        /// shorter than 30 ms. Zero for every other shot.
+        /// </summary>
+        internal static float ContinuousFireInterval(bool isAutoWeapon, bool continuousMode, float fireRate)
+        {
+            if (!isAutoWeapon || !continuousMode) return 0f;
+            if (!(fireRate > 0f)) return 0.1f;
+            return Mathf.Max(60f / fireRate, 0.03f);
         }
 
         /// <summary>

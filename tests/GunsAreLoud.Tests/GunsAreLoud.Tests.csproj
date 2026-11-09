@@ -16,7 +16,20 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Update="Data\ammo-spt-4.1.5.csv" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\client\GunsAreLoud.Client\GunsAreLoud.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Where to find other mods installed in the game, for compatibility
+         tests that skip when the mod is not there. -->
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>SptGameDir</_Parameter1>
+      <_Parameter2>$(SptGameDir)</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
 
   <ItemGroup>

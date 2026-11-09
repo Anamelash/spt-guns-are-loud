@@ -1,8 +1,9 @@
-using BepInEx.Configuration;
+﻿using BepInEx.Configuration;
 using UnityEngine;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using GunsAreLoud.Client.Runtime;
 
 namespace GunsAreLoud.Client.Configuration
 {
@@ -55,6 +56,12 @@ namespace GunsAreLoud.Client.Configuration
         TailAfterBurst
     }
 
+    internal enum DirectLevelTarget
+    {
+        Energy,
+        Baseline
+    }
+
     internal sealed class TuningSnapshot
     {
         internal bool ExposureEnabled;
@@ -63,23 +70,17 @@ namespace GunsAreLoud.Client.Configuration
         internal float MaximumDose;
         internal float FastRecoverySeconds;
         internal float SlowRecoverySeconds;
-        internal float EnergyInfluence;
-        internal float MaximumEnergyCorrection;
-        internal float ModLoudnessInfluence;
-        internal float SuppressedMultiplier;
-        internal float RimfireSeverity;
-        internal float PistolSeverity;
-        internal float IntermediateSeverity;
-        internal float FullPowerSeverity;
-        internal float ShotgunSeverity;
-        internal float HeavySeverity;
-        internal float UnknownCaliberSeverity;
+        /// <summary>Audible dB of the shot per point of the muzzle devices' loudness stat (F12), and the same on the level index.</summary>
+        internal float MuzzleDeviceDb;
+        internal float MuzzleDeviceIndexPerLoudness;
         internal bool EarModelEnabled;
         internal float LongGunAsymmetry;
         internal float CompactGunAsymmetry;
         internal float PistolAsymmetry;
         internal float MaximumAsymmetry;
         internal bool HearingLossEnabled;
+        /// <summary>Explosions are held to the shot level scale by their distance.</summary>
+        internal bool ExplosionLevelEnabled;
         internal float MaximumAttenuationDb;
         internal float MinimumLowpassHz;
         internal float HearingResponseCurve;
@@ -96,9 +97,7 @@ namespace GunsAreLoud.Client.Configuration
         internal float MinimumHeadphonesProtectionDb;
         internal float MaximumHeadphonesProtectionDb;
         internal float IndoorHeadphonesPenaltyDb;
-        internal float FullPowerHeadphonesPenaltyDb;
-        internal float ShotgunHeadphonesPenaltyDb;
-        internal float HeavyHeadphonesPenaltyDb;
+        internal float HeadsetCaliberPenaltyDb;
         internal float BaseDirectBoostDb;
         internal float CaliberBoostSpreadDb;
         internal float IndoorDirectBoostDb;
@@ -116,6 +115,11 @@ namespace GunsAreLoud.Client.Configuration
         internal float PitchedLayerGainDb;
         internal float LowEndNormalizationPercent;
         internal float CaliberContrastPercent;
+        internal float DirectLevelNormalizationDb;
+        internal DirectLevelTarget DirectLevelTarget;
+        internal float CopyHeadroomDb;
+        /// <summary>Shot density, dB; 0 when the switch is off.</summary>
+        internal float ShotDensityDb;
         internal PitchedLayerOcclusionMode PitchedLayerOcclusion;
         internal float PitchedLayerOccludedLowpassHz;
         internal float IndoorRoomStrength;
@@ -145,6 +149,11 @@ namespace GunsAreLoud.Client.Configuration
         internal readonly ConfigEntry<float> PitchedLayerGainDb;
         internal readonly ConfigEntry<float> LowEndNormalizationDb;
         internal readonly ConfigEntry<float> CartridgeContrastDb;
+        internal readonly ConfigEntry<float> DirectLevelNormalizationDb;
+        internal readonly ConfigEntry<DirectLevelTarget> DirectLevelTarget;
+        internal readonly ConfigEntry<float> CopyHeadroomDb;
+        internal readonly ConfigEntry<bool> ShotDensity;
+        internal readonly ConfigEntry<float> ShotDensityDb;
         internal readonly ConfigEntry<PitchedLayerOcclusionMode> PitchedLayerOcclusion;
         internal readonly ConfigEntry<float> PitchedLayerOccludedLowpassHz;
         internal readonly ConfigEntry<float> IndoorEmphasis;
@@ -155,11 +164,16 @@ namespace GunsAreLoud.Client.Configuration
         internal readonly ConfigEntry<HeadphonesFitPreset> HeadphonesFit;
         internal readonly ConfigEntry<HeadphoneMode> HeadphoneMode;
         internal readonly ConfigEntry<float> HearThroughCharacter;
+        internal readonly ConfigEntry<float> HeadsetCaliberPenaltyDb;
         internal readonly ConfigEntry<bool> PerformanceSummaryLog;
         internal readonly ConfigEntry<bool> DiagnosticShotLog;
 
         internal readonly ConfigEntry<float> BlastHearingStrength, BlastRingingStrength, BlastHearingDuration,
             BlastRingingDuration, BlastSevereDuration, BlastRadius, BlastIndoorScale;
+        internal readonly ConfigEntry<bool> ExplosionLevel;
+        internal readonly ConfigEntry<float> MuzzleDeviceDb;
+        internal const float DefaultMuzzleDeviceDb = 0.4f;
+        internal const float MaximumMuzzleDeviceDb = 1f;
         private TuningSnapshot _publishedTuning;
 
         /// <summary>
@@ -185,6 +199,8 @@ namespace GunsAreLoud.Client.Configuration
             BlastSevereDuration = BlastSetting(config, "Close Blast Hearing Loss Duration, s", 180f, 0f, 600f, "Near-total hearing loss at maximum exposure. Recovery occupies the final 50 percent. Zero disables this severe phase.");
             BlastRadius = BlastSetting(config, "Outdoor Close Blast Radius, m", 5f, .5f, 20f, "Unprotected maximum-exposure radius. Outside it, exposure falls with squared distance. Headsets reduce exposure.");
             BlastIndoorScale = BlastSetting(config, "Indoor Radius Multiplier", 3f, 1f, 4f, "Indoor radius multiplier. Indoor exposure falls inversely with distance instead of squared distance.");
+            ExplosionLevel = Bind(config, "03. Explosions", "Explosion Level", true,
+                "Explosions are placed on the same level scale as the shots, by their distance: a hand grenade within about 20 m stands at the top of the scale, at 30 m with a rifle, at 40 m with a pistol, and falls 7.5 dB per doubling of distance beyond. Off: explosions play at the level the game gives them.");
 
             Enabled = Bind(config,
                 "01. General",
@@ -213,20 +229,30 @@ namespace GunsAreLoud.Client.Configuration
                     "Music, UI, voice chat, and EFT's headset processing are not changed by this control.",
                     new AcceptableValueRange<float>(0f, 18f)));
 
+            MuzzleDeviceDb = Bind(config,
+                "02. Gunshots", "Muzzle Device Influence, dB", DefaultMuzzleDeviceDb,
+                new ConfigDescription(
+                    "How much the muzzle devices on your weapon change the loudness of your own shot, in dB per point of the device's Loudness stat in the game. " +
+                    "Suppressors are rated -12 to -39 (a big can or an integral suppressor at the low end, a short moderator at the high end), compensators and brakes +5 to +40: " +
+                    "at 0.4 a -25 suppressor takes the shot 10 dB down and a +10 compensator 4 dB up, and the hearing dose follows the same scale. 0 ignores the devices.",
+                    new AcceptableValueRange<float>(0f, MaximumMuzzleDeviceDb)));
+
             AutomaticPitchedRoute = Bind(config,
                 "04. Low-level & debug",
                 "Automatic Weapon Route",
                 Configuration.AutomaticPitchedRoute.CachedReport,
                 Advanced(
                     "CachedReport is the supported route: when the weapon is equipped it prepares one authored body interval plus its recorded tail, then plays each round through EFT's Gunshots mixer, with the calibrated level correction applied. " +
-                    "BuiltInDSP is the legacy route, kept for comparison only. It costs less because it adds the low end inside the weapon's own audio callback instead of playing a copy, but it has its own filter response rather than the original recording's, gives no recorded tail per round, reserves 2 MiB per source, and level correction between weapons is switched off for it."));
+                    "BuiltInDSP is the legacy route, kept for comparison only. It costs less because it adds the low end inside the weapon's own audio callback instead of playing a copy, but it has its own filter response rather than the original recording's, gives no recorded tail per round, reserves 2 MiB per source, and level correction between weapons is switched off for it. " +
+                    EngineNote));
 
             AutomaticTailMode = Bind(config,
                 "04. Low-level & debug",
                 "Automatic Report Shape",
                 Configuration.AutomaticTailMode.FullReportPerShot,
                 Advanced(
-                    "FullReportPerShot gives every bullet its processed body and recorded tail, including the first shot of a burst. TailAfterBurst uses a short body with optional synthetic decay and plays the recorded tail only when the trigger is released. Applies to CachedReport."));
+                    "FullReportPerShot gives every bullet its processed body and recorded tail, including the first shot of a burst. TailAfterBurst uses a short body with optional synthetic decay and plays the recorded tail only when the trigger is released. Applies to CachedReport. " +
+                    EngineNote));
 
             AutomaticReportOverlapShots = Bind(config,
                 "04. Low-level & debug",
@@ -250,7 +276,8 @@ namespace GunsAreLoud.Client.Configuration
                     "How far behind its own round an added report copy may still be played before it is skipped instead. " +
                     "100% is one audio buffer or a quarter of the fire interval, whichever is shorter — about 21 ms at a 1024-sample buffer. " +
                     "Raise it if bursts sound thin on a machine with long frames: more copies are kept, but a kept copy lands further behind its round and can be heard as a double hit. " +
-                    "Lower it for the opposite trade. The performance summary reports the outcome as autoBeats=on time/late/skipped/collapsed/early.",
+                    "Lower it for the opposite trade. The performance summary reports the outcome as autoBeats=on time/late/skipped/collapsed/early. " +
+                    EngineNote,
                     new AcceptableValueRange<float>(25f, 400f),
                     new ConfigurationManagerAttributes { IsAdvanced = true }));
 
@@ -276,13 +303,67 @@ namespace GunsAreLoud.Client.Configuration
                     new AcceptableValueRange<float>(0f, 1.5f * LowEndNormalizationSpanDb),
                     new ConfigurationManagerAttributes { IsAdvanced = true }));
 
+            DirectLevelNormalizationDb = Bind(config,
+                "04. Low-level & debug", "Direct Level Normalization, dB", DirectLevelModel.NormalizationSpanDb,
+                new ConfigDescription(
+                    "How strongly the loudness of your own shot follows the cartridge instead of the recording. " +
+                    "Every recording is measured once and the whole shot (recording, tail, room and added low end) is moved towards a level set by the round's muzzle energy and the distance from the muzzle to your ear, " +
+                    "so a pistol sits below an assault rifle and a heavy rifle is not quieter than an assault rifle. " +
+                    "0 dB plays the recordings as shipped; 12 dB is the full correction. " +
+                    "It also evens out the stock sounds and replacement sound packs, which are mastered to different levels. " +
+                    "The shot never peaks above a fixed budget before the output limiter: a loud recording is cut, a quiet one is lifted only as far as its peak allows, and the added low end gives way first.",
+                    new AcceptableValueRange<float>(0f, DirectLevelModel.NormalizationSpanDb),
+                    new ConfigurationManagerAttributes { IsAdvanced = true }));
+
+            DirectLevelTarget = Bind(config,
+                "04. Low-level & debug", "Direct Level Target",
+                Configuration.DirectLevelTarget.Energy,
+                Advanced(
+                    "What the corrected loudness of your own shot follows. " +
+                    "Energy is continuous: the round's muzzle energy and the distance from the muzzle to your ear, louder indoors. " +
+                    "Baseline uses four fixed levels by cartridge class (pistol, intermediate, rifle, heavy); a caliber without a class is placed by its muzzle energy."));
+
+            Bind(config, "04. Low-level & debug", "Reset Level Cache", "Button (not a setting)",
+                new ConfigDescription(
+                    "Forgets every measured recording and empties GunsAreLoud.LevelCache.json. " +
+                    "Recordings are measured again when a weapon is equipped; the weapon in hand is measured again at once, " +
+                    "and its added low end and loudness correction return as that finishes.", null,
+                    new ConfigurationManagerAttributes { CustomDrawer = LevelCacheResetControl.Draw, HideDefaultButton = true, IsAdvanced = true }));
+
+            ShotDensity = Bind(config,
+                "02. Gunshots", "Shot Density", true,
+                "Denser shots. Your own shot is driven into a fast program limiter that rounds off the crack and lets " +
+                "the body and the room through at full level, the way most games master their gunshots. " +
+                "The loudness of the attack still follows the cartridge, so the order of weapons does not change. " +
+                "Off keeps the recordings' own crack-and-room shape with the limiter as a safety only. Takes effect on the next shot.");
+
+            ShotDensityDb = Bind(config,
+                "04. Low-level & debug", "Shot Density, dB", DirectLevelModel.DefaultDensityDb,
+                new ConfigDescription(
+                    "How far over its peak budget a shot may go into the program limiter when Shot Density is on. " +
+                    "More is denser: the crack is taken down further and the body and room come up further. " +
+                    "Dense recordings (pistols, shotguns) are not affected; sparse ones (most rifles) are.",
+                    new AcceptableValueRange<float>(DirectLevelModel.MinimumDensityDb, DirectLevelModel.MaximumDensityDb),
+                    new ConfigurationManagerAttributes { IsAdvanced = true }));
+
+            CopyHeadroomDb = Bind(config,
+                "04. Low-level & debug", "Copy Headroom, dB", DirectLevelModel.DefaultCopyHeadroomDb,
+                new ConfigDescription(
+                    "How much of the shot's peak budget the recording leaves to the added low end. " +
+                    "0 dB lets the recording use the whole budget, so the low end of loud rifles is cut hard; " +
+                    "more headroom keeps more low end and makes those shots a little quieter. " +
+                    "Only shots whose recording and low end together would exceed the budget are affected.",
+                    new AcceptableValueRange<float>(0f, DirectLevelModel.MaximumCopyHeadroomDb),
+                    new ConfigurationManagerAttributes { IsAdvanced = true }));
+
             CartridgeContrastDb = Bind(config,
                 "04. Low-level & debug", "Cartridge Contrast, dB",
                 Converted(config, "Cartridge Contrast, %", CartridgeContrastSpanDb,
-                    0f, 3f * CartridgeContrastSpanDb, 2f * CartridgeContrastSpanDb),
+                    0f, 3f * CartridgeContrastSpanDb, DefaultCartridgeContrastDb),
                 new ConfigDescription(
                     "How far apart cartridge families sit in the added low-end layer, not in the complete gunshot. " +
-                    "This is the level of an intermediate rifle cartridge above 9×19: 0 dB removes the weighting, 6 dB is the tuned default, 9 dB is the maximum. " +
+                    "This is the level of an intermediate rifle cartridge above 9×19: 0 dB removes the weighting, 3 dB is the default, 9 dB is the maximum. " +
+                    "The weight follows the round's energy on the same scale, so heavier rounds sit higher and lighter ones lower. " +
                     "Recording differences can still dominate when normalization is partial or limited.",
                     new AcceptableValueRange<float>(0f, 3f * CartridgeContrastSpanDb),
                     new ConfigurationManagerAttributes { IsAdvanced = true }));
@@ -418,6 +499,14 @@ namespace GunsAreLoud.Client.Configuration
                     "up to 200% exaggerates it. Vanilla is unaffected.",
                     new AcceptableValueRange<float>(0f, 200f)));
 
+            HeadsetCaliberPenaltyDb = Bind(config, "01. General", "Headset Caliber Penalty, dB", 6f,
+                new ConfigDescription(
+                    "How much more of a heavy cartridge gets through the ear cups of a worn headset. " +
+                    "The more energy a round carries, the more of its low end leaks past the seal, so a full-power rifle or a .50 caliber leaves more hearing loss and ringing behind than an assault rifle does. " +
+                    "The value is the protection a .50 BMG round takes away; lighter rounds take proportionally less (about a third of it for 7.62x51), and pistols and 5.45x39 take none. " +
+                    "0 gives every cartridge the same protection. This affects the gameplay hearing-dose model, not the Realistic headset filter curve.",
+                    new AcceptableValueRange<float>(0f, 10f)));
+
             Bind(config, "01. General", "Headset Diagnostics", "Live status (not a setting)",
                 new ConfigDescription("Live native DSP and mixer connection checks. Counters measure processing calls, not perceived sound quality.", null,
                     new ConfigurationManagerAttributes { CustomDrawer = Audio.HeadphoneDiagnostics.Draw, HideDefaultButton = true }));
@@ -501,7 +590,8 @@ namespace GunsAreLoud.Client.Configuration
         {
             string[] keys = {
                 "Enabled", "Preset", "Hearing Loss", "Ringing",
-                "Headset Processing", "Headset Fit", "Hear-through Character, %", "Headset Diagnostics",
+                "Headset Processing", "Headset Fit", "Hear-through Character, %", "Headset Caliber Penalty, dB",
+                "Headset Diagnostics",
                 "Gunshot Impact", "Gunshot Contrast, dB", "Indoor Emphasis",
                 "Hearing Loss Intensity, %", "Hearing Loss Duration, %",
                 "Ringing Intensity, %", "Ringing Duration, %", "Left/Right Ear Difference",
@@ -511,7 +601,9 @@ namespace GunsAreLoud.Client.Configuration
                 "Automatic Weapon Route", "Automatic Report Shape",
                 "Automatic Report Overlap, shots", "Late Report Tolerance, %",
                 "Pitch Reduction, semitones", "Lower Cutoff (High-Pass), Hz", "Upper Cutoff (Low-Pass), Hz",
-                "Copy Gain, dB", "Low-End Normalization, dB", "Cartridge Contrast, dB",
+                "Copy Gain, dB", "Low-End Normalization, dB",
+                "Direct Level Normalization, dB", "Direct Level Target", "Copy Headroom, dB",
+                "Cartridge Contrast, dB",
                 "Fade-Out Portion, %", "Automatic Fallback Decay, ms", "Copy Occlusion",
                 "Fully Occluded Low-Pass, Hz",
                 "Performance Summary Log", "Log Every Local Shot"
@@ -549,17 +641,8 @@ namespace GunsAreLoud.Client.Configuration
                 MaximumDose = 4f,
                 FastRecoverySeconds = profile.FastRecoverySeconds,
                 SlowRecoverySeconds = profile.SlowRecoverySeconds * 1.2f,
-                EnergyInfluence = 0.18f,
-                MaximumEnergyCorrection = 0.25f,
-                ModLoudnessInfluence = 0.35f,
-                SuppressedMultiplier = 0.38f,
-                RimfireSeverity = 0.35f,
-                PistolSeverity = 0.58f,
-                IntermediateSeverity = 0.86f,
-                FullPowerSeverity = 1.12f,
-                ShotgunSeverity = 1.02f,
-                HeavySeverity = 1.55f,
-                UnknownCaliberSeverity = 0.75f,
+                MuzzleDeviceDb = Mathf.Clamp(MuzzleDeviceDb.Value, 0f, MaximumMuzzleDeviceDb),
+                MuzzleDeviceIndexPerLoudness = Mathf.Clamp(MuzzleDeviceDb.Value, 0f, MaximumMuzzleDeviceDb) / DirectLevelModel.SlopePerDb,
                 EarModelEnabled = earDifference > 0.001f,
                 LongGunAsymmetry = Mathf.Min(0.25f, 0.12f * earDifference),
                 CompactGunAsymmetry = Mathf.Min(0.2f, 0.06f * earDifference),
@@ -582,9 +665,7 @@ namespace GunsAreLoud.Client.Configuration
                 MinimumHeadphonesProtectionDb = 10f,
                 MaximumHeadphonesProtectionDb = 30f,
                 IndoorHeadphonesPenaltyDb = 6f,
-                FullPowerHeadphonesPenaltyDb = 2f,
-                ShotgunHeadphonesPenaltyDb = 3f,
-                HeavyHeadphonesPenaltyDb = 6f,
+                HeadsetCaliberPenaltyDb = Mathf.Clamp(HeadsetCaliberPenaltyDb.Value, 0f, 10f),
                 BaseDirectBoostDb = profile.BaseDirectBoostDb * impact,
                 CaliberBoostSpreadDb = profile.CaliberBoostSpreadDb * impact,
                 IndoorDirectBoostDb = profile.IndoorDirectBoostDb * impact * indoor,
@@ -605,6 +686,13 @@ namespace GunsAreLoud.Client.Configuration
                 PitchedLayerGainDb = PitchedLayerGainDb.Value,
                 LowEndNormalizationPercent = LowEndNormalizationDb.Value * 100f / LowEndNormalizationSpanDb,
                 CaliberContrastPercent = CartridgeContrastDb.Value * 100f / CartridgeContrastSpanDb,
+                DirectLevelNormalizationDb = Mathf.Clamp(DirectLevelNormalizationDb.Value, 0f, DirectLevelModel.NormalizationSpanDb),
+                DirectLevelTarget = this.DirectLevelTarget.Value,
+                CopyHeadroomDb = Mathf.Clamp(CopyHeadroomDb.Value, 0f, DirectLevelModel.MaximumCopyHeadroomDb),
+                ShotDensityDb = ShotDensity.Value
+                    ? Mathf.Clamp(ShotDensityDb.Value, DirectLevelModel.MinimumDensityDb, DirectLevelModel.MaximumDensityDb)
+                    : 0f,
+                ExplosionLevelEnabled = ExplosionLevel.Value,
                 PitchedLayerOcclusion = this.PitchedLayerOcclusion.Value,
                 PitchedLayerOccludedLowpassHz = PitchedLayerOccludedLowpassHz.Value,
                 IndoorRoomStrength = indoor,
@@ -637,6 +725,16 @@ namespace GunsAreLoud.Client.Configuration
 
         /// <summary>An intermediate rifle cartridge above 9x19, at one hundred percent.</summary>
         internal const float CartridgeContrastSpanDb = 3f;
+
+        /// <summary>The default of "Cartridge Contrast, dB".</summary>
+        internal const float DefaultCartridgeContrastDb = 3f;
+
+        /// <summary>
+        /// Appended to the automatic-fire settings that describe EFT's looped
+        /// body, which an engine playing its own shots does not use; empty for
+        /// the stock engine.
+        /// </summary>
+        internal static string EngineNote => Engine.SoundEngine.Shots.SettingsNote;
 
         /// <summary>
         /// The starting value for a control that used to be a percentage: the

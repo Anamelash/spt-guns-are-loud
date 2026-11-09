@@ -63,10 +63,64 @@ namespace GunsAreLoud.Client.Audio
             }
             if (source is ReverbSuperSource reverbSource)
             {
+                BypassChannel(binding, reverbSource._reverbSourceA);
+                BypassChannel(binding, reverbSource._reverbSourceB);
                 RestoreRoomResponse(reverbSource);
             }
+            binding.Direct = DirectLevelDecision.None;
             PitchedGunshotLayer.StopForSource(source);
             binding.BeatTimeline()?.StopTimeline();
+        }
+
+        /// <summary>
+        /// Puts the correction of this shot on both channels of the source and,
+        /// on a source with EFT's wet room copies, on those too: the room follows
+        /// the shot it belongs to. It stays until the source is bypassed for
+        /// another sound. A gain of exactly 1 leaves the channels without an
+        /// active filter.
+        /// </summary>
+        internal static void ApplyDirectGain(SuperSource source, DirectLevelDecision decision)
+        {
+            if (source == null) return;
+            GalSourceBinding binding = GalSourceBinding.Of(source);
+            binding.Direct = decision;
+            float gain = decision.Linear;
+            SetDirectGain(binding, source.source1, gain);
+            SetDirectGain(binding, source.source2, gain);
+            if (source is ReverbSuperSource reverbSource)
+            {
+                SetDirectGain(binding, reverbSource._reverbSourceA, gain);
+                SetDirectGain(binding, reverbSource._reverbSourceB, gain);
+            }
+        }
+
+        /// <summary>The linear direct correction the source currently carries; 1 when none.</summary>
+        internal static float DirectGain(BetterSource source)
+        {
+            GalSourceBinding binding = GalSourceBinding.Find(source);
+            return binding != null && binding.Armed ? binding.Direct.Linear : 1f;
+        }
+
+        /// <summary>The factor the copy of the source's shot plays at: the correction times the copy's share of its ratio; 1 when none.</summary>
+        internal static float CopyGain(BetterSource source)
+        {
+            GalSourceBinding binding = GalSourceBinding.Find(source);
+            return binding != null && binding.Armed ? binding.Direct.CopyLinear : 1f;
+        }
+
+        private static void SetDirectGain(GalSourceBinding binding, AudioSource channel, float gain)
+        {
+            if (channel == null) return;
+            if (gain == 1f)
+            {
+                DirectLevelGainFilter existing = binding.DirectFilter(channel);
+                if (existing != null) { existing.SetGain(1f); SetActive(existing, false); }
+                return;
+            }
+            GalSourceCensus.NoteSource(channel.GetInstanceID());
+            DirectLevelGainFilter filter = binding.EnsureDirectFilter(channel);
+            filter.SetGain(gain);
+            SetActive(filter, true);
         }
 
         internal static void PrepareAutomaticPitchedBeat(
@@ -232,9 +286,9 @@ namespace GunsAreLoud.Client.Audio
                 Mathf.Max(10f, lowpassHz - 10f));
             float openGain = PitchedGunshotLayer.CalculateLayerGain(
                 tuning.DirectBodyGain,
-                tuning.PressureFrequencyHz,
+                tuning.EnergyIndex,
                 tuning.PitchedLayerGainDb,
-                tuning.CaliberContrastPercent) * tuning.HeadphonesDamping.BodyGain;
+                tuning.CartridgeContrastDb) * tuning.HeadphonesDamping.BodyGain;
             float gain = PitchedGunshotLayer.CalculateOccludedGain(
                 openGain,
                 donorOcclusion,
@@ -276,6 +330,8 @@ namespace GunsAreLoud.Client.Audio
 
             AutomaticPitchedGunshotFilter pitched = binding.PitchedFilter(source);
             AutomaticBeatCapture capture = binding.Capture(source);
+            DirectLevelGainFilter direct = binding.DirectFilter(source);
+            if (direct != null) { direct.SetGain(1f); SetActive(direct, false); }
             pitched?.Bypass();
             capture?.Cancel();
             // Bypassing is not enough: a disabled behaviour receives no
@@ -421,13 +477,12 @@ namespace GunsAreLoud.Client.Audio
         {
             internal bool Captured;
             internal bool Overridden;
-            private bool _enableReverb;
+            private readonly ReverbOverride _reverb = new ReverbOverride();
             private SpatializerValues _a;
             private SpatializerValues _b;
 
             internal void Capture(ReverbSuperSource source)
             {
-                _enableReverb = source.EnableReverb;
                 _a = SpatializerValues.Capture(source._spatializerA);
                 _b = SpatializerValues.Capture(source._spatializerB);
                 Captured = true;
@@ -435,17 +490,50 @@ namespace GunsAreLoud.Client.Audio
 
             internal void Apply(ReverbSuperSource source, LocalGunshotAudioTuning tuning)
             {
-                source.EnableReverb = true;
+                source.EnableReverb = _reverb.Apply(source.EnableReverb);
                 _a.Apply(source._spatializerA, tuning);
                 _b.Apply(source._spatializerB, tuning);
             }
 
             internal void Restore(ReverbSuperSource source)
             {
-                source.EnableReverb = _enableReverb;
+                if (_reverb.Restore(source.EnableReverb, out bool reverb)) source.EnableReverb = reverb;
                 _a.Restore(source._spatializerA);
                 _b.Restore(source._spatializerB);
                 Overridden = false;
+            }
+        }
+
+        /// <summary>
+        /// The room response needs the source's reverb on. Turning it back off
+        /// is this mod's business only if this mod turned it on: whoever owns
+        /// the source may have set it since (Sound Engine Backport resets it to
+        /// its own default right before releasing a source), and a blind
+        /// restore of a value captured long ago would overwrite theirs.
+        /// </summary>
+        internal sealed class ReverbOverride
+        {
+            private bool _forced;
+
+            internal bool Forced => _forced;
+
+            /// <returns>The value to write: always on.</returns>
+            internal bool Apply(bool current)
+            {
+                // Repeated shots on the same source keep the first decision
+                // until it has been restored.
+                if (!current) _forced = true;
+                return true;
+            }
+
+            /// <returns>Whether to write <paramref name="value"/>.</returns>
+            internal bool Restore(bool current, out bool value)
+            {
+                value = current;
+                if (!_forced) return false;
+                _forced = false;
+                value = false;
+                return current;
             }
         }
 

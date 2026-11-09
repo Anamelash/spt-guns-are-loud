@@ -161,7 +161,16 @@ namespace GunsAreLoud.Client.Audio
     {
         internal const float Ceiling = 0.999f;
         internal const float Knee = 0.95f;
-        private const double ReleaseSeconds = 0.2;
+        /// <summary>Safety mode: a whole report is turned down and the gain given back over this time.</summary>
+        internal const double SafetyReleaseSeconds = 0.2;
+        /// <summary>
+        /// Program mode: the gain reaches the frame that needs it along a ramp
+        /// this long, so a crack is rounded rather than stepped, and comes back
+        /// within the crack's own length, so neither the body of the shot nor
+        /// the world under it is held down.
+        /// </summary>
+        internal const double ProgramLookaheadSeconds = 0.002;
+        internal const double ProgramReleaseSeconds = 0.01;
         // An exponential release approaches its target asymptotically, and near
         // unity the step it adds falls under a float's resolution — the gain then
         // stops advancing a hair short and every buffer for the rest of the
@@ -173,13 +182,43 @@ namespace GunsAreLoud.Client.Audio
         private float _release;
         private int _rate;
         private bool _initialized;
+        private bool _program;
+        // Program mode only: the audio waits one lookahead for its gain. The
+        // promised gain of every waiting frame sits in a ring one slot longer
+        // than the delay; the frame leaving takes its slot's promise with it.
+        private int _lookahead;
+        private int _channels;
+        private float[] _delay;
+        private float[] _pending;
+        private int _slot;
+        private int _delaySlot;
 
         internal float Gain => _initialized ? _gain : 1f;
+        internal bool Program => _program;
+        /// <summary>How many frames later a sample leaves than it arrived: the lookahead in program mode, none in safety mode.</summary>
+        internal int DelayFrames => _program ? _lookahead : 0;
 
         internal void Reset()
         {
             _gain = 1f;
             _initialized = true;
+            if (_pending != null) for (int index = 0; index < _pending.Length; index++) _pending[index] = 1f;
+        }
+
+        /// <summary>
+        /// Switches between the safety limiter and the program limiter. The
+        /// switch drops the carried gain and the waiting audio: one lookahead of
+        /// silence, at a settings change only.
+        /// </summary>
+        internal void SetProgram(bool program)
+        {
+            if (_program == program && _initialized) return;
+            _program = program;
+            _rate = 0;
+            Reset();
+            if (_delay != null) Array.Clear(_delay, 0, _delay.Length);
+            _slot = 0;
+            _delaySlot = 0;
         }
 
         /// <summary>
@@ -193,8 +232,16 @@ namespace GunsAreLoud.Client.Audio
             inputPeak = 0f;
             deepestGain = 1f;
             if (data == null || channels < 1) return 0;
-            Configure(sampleRate);
+            Configure(sampleRate, channels);
+            return _program
+                ? ProcessProgram(data, channels, out inputPeak, out deepestGain)
+                : ProcessSafety(data, channels, out inputPeak, out deepestGain);
+        }
 
+        private int ProcessSafety(float[] data, int channels, out float inputPeak, out float deepestGain)
+        {
+            inputPeak = 0f;
+            deepestGain = 1f;
             int engaged = 0;
             float gain = _gain;
             for (int frame = 0; frame + channels <= data.Length; frame += channels)
@@ -242,6 +289,101 @@ namespace GunsAreLoud.Client.Audio
         }
 
         /// <summary>
+        /// Program mode. Every arriving frame promises a gain to itself and,
+        /// along a linear ramp, to the frames of the lookahead before it; the
+        /// frame that leaves (one lookahead old) takes the lowest promise made
+        /// to it. The attack is therefore a ramp that lands exactly on the
+        /// frame that needs it, the release is the program release, and no
+        /// sample leaves above the ceiling.
+        /// </summary>
+        private int ProcessProgram(float[] data, int channels, out float inputPeak, out float deepestGain)
+        {
+            inputPeak = 0f;
+            deepestGain = 1f;
+            int engaged = 0;
+            float gain = _gain;
+            int lookahead = _lookahead;
+            int slots = lookahead + 1;
+            float[] pending = _pending;
+            float[] delay = _delay;
+            int slot = _slot;
+            int delaySlot = _delaySlot;
+            for (int frame = 0; frame + channels <= data.Length; frame += channels)
+            {
+                float magnitude = 0f;
+                for (int channel = 0; channel < channels; channel++)
+                {
+                    float value = data[frame + channel];
+                    if (float.IsNaN(value) || float.IsInfinity(value))
+                    {
+                        value = HearingDspTransfer.SanitizeAndClamp(value, out _);
+                        data[frame + channel] = value;
+                    }
+                    if (channel < 2)
+                    {
+                        float other = Math.Abs(value);
+                        if (other > magnitude) magnitude = other;
+                    }
+                }
+                if (magnitude > inputPeak) inputPeak = magnitude;
+                if (magnitude > Knee)
+                {
+                    float needed = SoftGain(magnitude);
+                    for (int back = 0; back <= lookahead; back++)
+                    {
+                        int promised = slot - back;
+                        if (promised < 0) promised += slots;
+                        float ramp = 1f - (1f - needed) * (1f - back / (float)slots);
+                        if (ramp < pending[promised]) pending[promised] = ramp;
+                    }
+                }
+                // The frame leaving now is one lookahead old: its slot is the one
+                // the next arriving frame will take.
+                int leaving = slot + 1 == slots ? 0 : slot + 1;
+                float target = pending[leaving];
+                pending[leaving] = 1f;
+                if (target < gain)
+                {
+                    gain = target;                                      // attack: along the ramp
+                }
+                else if (gain < target)
+                {
+                    float step = (target - gain) * _release;            // release: within a crack
+                    if (step < MinimumReleaseStep) step = MinimumReleaseStep;
+                    gain += step;
+                    if (gain > target) gain = target;
+                }
+                if (gain >= 1f) gain = 1f;
+                else
+                {
+                    engaged++;
+                    if (gain < deepestGain) deepestGain = gain;
+                }
+                if (lookahead > 0)
+                {
+                    int waiting = delaySlot * channels;
+                    for (int channel = 0; channel < channels; channel++)
+                    {
+                        float arrived = data[frame + channel];
+                        float old = delay[waiting + channel];
+                        delay[waiting + channel] = arrived;
+                        data[frame + channel] = gain < 1f ? old * gain : old;
+                    }
+                    delaySlot = delaySlot + 1 == lookahead ? 0 : delaySlot + 1;
+                }
+                else if (gain < 1f)
+                {
+                    for (int channel = 0; channel < channels; channel++) data[frame + channel] *= gain;
+                }
+                slot = leaving;
+            }
+            _gain = gain;
+            _slot = slot;
+            _delaySlot = delaySlot;
+            return engaged;
+        }
+
+        /// <summary>
         /// The gain that puts a frame of this magnitude on the soft curve. It is
         /// 1 exactly at the knee and never lets the result reach the ceiling, so
         /// the transfer is continuous and the output is bounded by construction.
@@ -253,13 +395,29 @@ namespace GunsAreLoud.Client.Audio
             return (Knee + Span * (above / (1f + above))) / magnitude;
         }
 
-        private void Configure(int sampleRate)
+        private void Configure(int sampleRate, int channels)
         {
             int rate = Math.Max(8000, sampleRate);
             if (!_initialized) Reset();
-            if (rate == _rate) return;
+            if (rate == _rate && (!_program || channels == _channels)) return;
+            bool rateChanged = rate != _rate;
             _rate = rate;
-            _release = (float)(1.0 - Math.Exp(-1.0 / (rate * ReleaseSeconds)));
+            _release = (float)(1.0 - Math.Exp(-1.0 / (rate * (_program ? ProgramReleaseSeconds : SafetyReleaseSeconds))));
+            if (!_program) return;
+            // A new rate or channel count: the rings are rebuilt and the waiting
+            // audio is dropped; either change already means a glitch of its own.
+            _lookahead = (int)(rate * ProgramLookaheadSeconds);
+            _channels = channels;
+            if (rateChanged || _pending == null || _pending.Length != _lookahead + 1)
+            {
+                _pending = new float[_lookahead + 1];
+                for (int index = 0; index < _pending.Length; index++) _pending[index] = 1f;
+            }
+            int delayLength = _lookahead * channels;
+            if (_delay == null || _delay.Length != delayLength) _delay = new float[delayLength];
+            else Array.Clear(_delay, 0, _delay.Length);
+            _slot = 0;
+            _delaySlot = 0;
         }
     }
 
@@ -298,6 +456,7 @@ namespace GunsAreLoud.Client.Audio
     {
         private int _targetFrames;
         internal int Frames { get; private set; }
+        internal int TargetFrames => _targetFrames;
         internal AudioPeakMeasurement Measurement;
         internal bool Complete => _targetFrames > 0 && Frames >= _targetFrames;
 

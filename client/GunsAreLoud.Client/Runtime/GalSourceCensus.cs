@@ -11,6 +11,7 @@ namespace GunsAreLoud.Client.Runtime
         BeatTimeline,
         ContrastFilter,
         SourceBinding,
+        DirectLevelGain,
         Count
     }
 
@@ -83,6 +84,7 @@ namespace GunsAreLoud.Client.Runtime
                 case GalComponentKind.PitchedLayer: return "pitchedLayer";
                 case GalComponentKind.BeatTimeline: return "beatTimeline";
                 case GalComponentKind.ContrastFilter: return "contrastFilter";
+                case GalComponentKind.DirectLevelGain: return "directGain";
                 default: return "sourceBinding";
             }
         }
